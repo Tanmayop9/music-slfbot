@@ -77,7 +77,71 @@ class MusicBot(discord.Client):
     # ──────────────────────────────────────────────────────────────────────────
 
     async def start_bot(self) -> None:
-        await self.start(self._token)
+        """Start the bot, automatically reconnecting on transient failures.
+
+        Permanently exits (without retrying) on:
+          - Invalid token (``discord.LoginFailure``)
+          - Fatal gateway close codes: 4004 (bad auth), 4010–4014 (config errors)
+
+        All other failures trigger an exponential back-off retry so that
+        network hiccups, Discord restarts, and similar transient issues do
+        not bring the whole process down.
+        """
+        _FATAL_CODES: frozenset[int] = frozenset({4004, 4010, 4011, 4012, 4013, 4014})
+        retry_delay: int = 5
+
+        while True:
+            try:
+                await self.start(self._token)
+                return  # clean / intentional shutdown
+
+            except discord.LoginFailure as exc:
+                log.error("Login failed — check your token: %s", exc)
+                return
+
+            except discord.ConnectionClosed as exc:
+                if exc.code in _FATAL_CODES:
+                    log.error(
+                        "Connection closed permanently (code %d): %s",
+                        exc.code, exc,
+                    )
+                    return
+                log.warning(
+                    "Connection closed (code %d) — reconnecting in %ds",
+                    exc.code, retry_delay,
+                )
+
+            except Exception as exc:
+                log.warning(
+                    "Connection lost (%s) — reconnecting in %ds",
+                    type(exc).__name__, retry_delay,
+                )
+
+            # ── Cleanup before retrying ────────────────────────────────────
+            for guild_id in list(self.players.keys()):
+                player = self.players.pop(guild_id)
+                try:
+                    await player.destroy()
+                except Exception as _exc:
+                    log.debug("Player destroy error during reconnect cleanup: %s", _exc)
+
+            try:
+                await self.node_pool.close()
+            except Exception as _exc:
+                log.debug("Node pool close error during reconnect cleanup: %s", _exc)
+            self.node_pool = NodePool()
+            self._pending_voice.clear()
+
+            # Ensure the gateway connection is fully closed, then reset the
+            # discord.py-self client state so start() can be called again.
+            try:
+                await self.close()
+            except Exception as _exc:
+                log.debug("Client close error during reconnect cleanup: %s", _exc)
+            self.clear()
+
+            await asyncio.sleep(retry_delay)
+            retry_delay = min(retry_delay * 2, 300)
 
     async def on_ready(self) -> None:
         assert self.user is not None
