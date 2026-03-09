@@ -4,6 +4,9 @@ config.yaml
 # Logs
 *.log
 
+# Persistent data (JSON stores)
+data/
+
 # Python
 __pycache__/
 *.py[cod]

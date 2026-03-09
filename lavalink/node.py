@@ -4,11 +4,11 @@ Lavalink v4 node — WebSocket + REST client with automatic reconnection.
 from __future__ import annotations
 
 import asyncio
-import json
 import logging
 from typing import Any, Callable, Dict, List, Optional
 
 import aiohttp
+import orjson
 
 from .models import LoadResult, LoadType, PlaylistInfo, Track
 
@@ -135,7 +135,7 @@ class LavalinkNode:
         try:
             async for msg in self._ws:
                 if msg.type == aiohttp.WSMsgType.TEXT:
-                    await self._dispatch(json.loads(msg.data))
+                    await self._dispatch(orjson.loads(msg.data))
                 elif msg.type in (aiohttp.WSMsgType.CLOSED, aiohttp.WSMsgType.ERROR):
                     break
         except Exception as exc:

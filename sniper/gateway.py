@@ -14,12 +14,12 @@ Features:
 from __future__ import annotations
 
 import asyncio
-import json
 import logging
 import time
 from typing import Any, Callable, Coroutine, Dict, Optional, Set
 
 import aiohttp
+import orjson
 
 log = logging.getLogger(__name__)
 
@@ -49,7 +49,7 @@ _CLIENT_PROPERTIES = {
     "referrer": "",
     "referring_domain": "",
     "release_channel": "stable",
-    "client_build_number": 281337,
+    "client_build_number": 281337,   # Discord stable build; update if gateway rejects IDENTIFY
 }
 
 
@@ -143,10 +143,10 @@ class GatewayMonitor:
         try:
             async for msg in self._ws:
                 if msg.type == aiohttp.WSMsgType.TEXT:
-                    await self._handle(json.loads(msg.data))
+                    await self._handle(orjson.loads(msg.data))
                 elif msg.type == aiohttp.WSMsgType.BINARY:
                     import zlib
-                    await self._handle(json.loads(zlib.decompress(msg.data)))
+                    await self._handle(orjson.loads(zlib.decompress(msg.data)))
                 elif msg.type in (aiohttp.WSMsgType.CLOSED, aiohttp.WSMsgType.ERROR):
                     log.debug("[%s] WS closed: %s", self.name, msg)
                     break
@@ -338,6 +338,7 @@ class GatewayMonitor:
     async def _send(self, payload: dict) -> None:
         if self._ws and not self._ws.closed:
             try:
-                await self._ws.send_json(payload)
+                # orjson encodes to bytes; send as a UTF-8 text frame
+                await self._ws.send_str(orjson.dumps(payload).decode())
             except Exception as exc:
                 log.debug("[%s] send error: %s", self.name, exc)

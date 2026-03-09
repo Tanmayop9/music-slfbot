@@ -2,40 +2,30 @@
 discord.py-self Client subclass.
 
 Responsibilities:
+  • Only process commands from the configured owner_id.
   • Receive Discord gateway messages (voice state / server updates).
   • Forward voice credentials to Lavalink so it can stream audio.
-  • Manage per-guild MusicPlayer instances.
+  • Manage per-guild MusicPlayer instances, restoring saved settings on create.
   • Update voice-channel status with the currently-playing track.
 """
 from __future__ import annotations
 
 import asyncio
-import json
 import logging
-from typing import Any, Dict, List, Optional
+from typing import TYPE_CHECKING, Any, Dict, List, Optional
 
 import discord
+import orjson
 
 from lavalink.pool import NodePool
 from music.player import MusicPlayer
+from music.queue import LoopMode
+
+if TYPE_CHECKING:
+    from sniper.core import VanitySniper
+    from storage.guild_settings import GuildSettings
 
 log = logging.getLogger(__name__)
-
-# Source-search prefix mapping (command shorthand -> Lavalink search prefix)
-SOURCE_PREFIXES: Dict[str, str] = {
-    "youtube": "ytsearch:",
-    "yt": "ytsearch:",
-    "spotify": "spsearch:",
-    "sp": "spsearch:",
-    "soundcloud": "scsearch:",
-    "sc": "scsearch:",
-    "jiosaavn": "jssearch:",
-    "js": "jssearch:",
-    "apple": "amsearch:",
-    "am": "amsearch:",
-    "deezer": "dzsearch:",
-    "dz": "dzsearch:",
-}
 
 
 class MusicBot(discord.Client):
@@ -46,19 +36,25 @@ class MusicBot(discord.Client):
         token: str,
         prefix: str,
         node_configs: List[Dict[str, Any]],
+        owner_id: int = 0,
         default_volume: int = 100,
         max_queue_size: int = 500,
         auto_disconnect: bool = True,
         disconnect_timeout: int = 300,
+        guild_settings: Optional["GuildSettings"] = None,
+        sniper: Optional["VanitySniper"] = None,
     ) -> None:
         super().__init__()
         self._token = token
         self.prefix = prefix
         self._node_configs = node_configs
+        self.owner_id = owner_id
         self.default_volume = default_volume
         self.max_queue_size = max_queue_size
         self.auto_disconnect = auto_disconnect
         self.disconnect_timeout = disconnect_timeout
+        self.guild_settings = guild_settings   # shared GuildSettings store
+        self.sniper = sniper                   # shared VanitySniper (may be None)
 
         self.node_pool: NodePool = NodePool()
         self.players: Dict[int, MusicPlayer] = {}
@@ -94,16 +90,30 @@ class MusicBot(discord.Client):
                 log.warning("Could not add node '%s': %s", nc.get("name", "?"), exc)
 
     # ──────────────────────────────────────────────────────────────────────────
-    # Message handling
+    # Message handling — owner-only
     # ──────────────────────────────────────────────────────────────────────────
 
     async def on_message(self, message: discord.Message) -> None:
-        # Selfbot: only react to own messages
-        if self.user is None or message.author.id != self.user.id:
+        # Determine whose messages to accept.
+        # • If owner_id is configured: accept messages from that account only.
+        # • Otherwise: accept only own messages (classic selfbot mode).
+        if self.user is None:
             return
-        if not message.content.startswith(self.prefix):
+        expected_id = self.owner_id if self.owner_id else self.user.id
+        if message.author.id != expected_id:
             return
-        content = message.content[len(self.prefix):]
+
+        # Check for per-guild prefix override, fall back to global prefix
+        effective_prefix = self.prefix
+        if message.guild and self.guild_settings:
+            effective_prefix = (
+                self.guild_settings.prefix(message.guild.id) or self.prefix
+            )
+
+        if not message.content.startswith(effective_prefix):
+            return
+
+        content = message.content[len(effective_prefix):]
         parts = content.split(None, 1)
         command = parts[0].lower()
         args = parts[1].strip() if len(parts) > 1 else ""
@@ -137,20 +147,16 @@ class MusicBot(discord.Client):
 
     async def on_socket_raw_receive(self, msg: Any) -> None:
         """Intercept raw gateway messages to capture VOICE_SERVER_UPDATE."""
-        if isinstance(msg, bytes):
-            try:
-                msg = msg.decode()
-            except Exception:
-                return
+        # orjson.loads accepts bytes and str
         try:
-            data = json.loads(msg)
+            data: dict = orjson.loads(msg)
         except Exception:
             return
 
         if data.get("t") != "VOICE_SERVER_UPDATE":
             return
 
-        d = data.get("d", {})
+        d = data.get("d") or {}
         try:
             guild_id = int(d.get("guild_id", 0))
         except (TypeError, ValueError):
@@ -200,11 +206,24 @@ class MusicBot(discord.Client):
         if node is None:
             log.warning("No available Lavalink nodes for guild %s", guild_id)
             return None
+
         player = MusicPlayer(guild_id, node)
-        player.volume = self.default_volume
         player.queue.max_size = self.max_queue_size
+
+        # Restore saved settings from JSON store
+        if self.guild_settings:
+            player.volume = self.guild_settings.volume(guild_id)
+            saved_loop = self.guild_settings.loop_mode(guild_id)
+            try:
+                player.set_loop(LoopMode(saved_loop))
+            except ValueError:
+                pass
+        else:
+            player.volume = self.default_volume
+
         if self.auto_disconnect:
             player.on_queue_end(self._on_queue_end)
+
         self.players[guild_id] = player
         return player
 
@@ -213,7 +232,6 @@ class MusicBot(discord.Client):
             return
         log.info("Queue empty in guild %s — disconnecting in %ds", guild_id, self.disconnect_timeout)
         await asyncio.sleep(self.disconnect_timeout)
-        # Only disconnect if queue is still empty
         player = self.players.get(guild_id)
         if player and player.current is None and player.queue.is_empty:
             await self.leave_voice(guild_id)
@@ -226,7 +244,6 @@ class MusicBot(discord.Client):
         guild = channel.guild
         try:
             await guild.change_voice_state(channel=channel, self_deaf=True)
-            # Allow a moment for VOICE_STATE_UPDATE and VOICE_SERVER_UPDATE
             await asyncio.sleep(0.5)
             player = await self.get_or_create_player(guild.id)
             if player:
@@ -254,7 +271,7 @@ class MusicBot(discord.Client):
     # ──────────────────────────────────────────────────────────────────────────
 
     async def update_voice_status(self, channel_id: int, status: str) -> None:
-        """Set the voice-channel status displayed below the channel name."""
+        """Set the voice-channel status shown below the channel name."""
         try:
             await self.http.request(
                 discord.http.Route(
@@ -277,3 +294,4 @@ class MusicBot(discord.Client):
             await player.destroy()
         await self.node_pool.close()
         await super().close()
+

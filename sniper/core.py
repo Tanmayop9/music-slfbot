@@ -54,13 +54,22 @@ class VanitySniper:
     Instantiate, call `start()`, and optionally call the command API
     (`add_target`, `remove_target`, `pause`, `resume`, `status`) from
     Discord command handlers.
+
+    Pass a `SniperData` instance via `sniper_data=` to enable JSON persistence
+    of targets and claim history across restarts.
     """
 
-    def __init__(self, config: dict) -> None:
+    def __init__(self, config: dict, sniper_data=None) -> None:
         self._config = config
         self._sniper_cfg: dict = config.get("sniper", {})
+        self._sniper_data = sniper_data  # Optional[SniperData] for JSON persistence
 
-        self._targets: Set[str] = set(self._sniper_cfg.get("targets") or [])
+        # Seed targets: JSON store takes priority over config file
+        if sniper_data is not None:
+            self._targets: Set[str] = sniper_data.get_targets()
+        else:
+            self._targets = set(self._sniper_cfg.get("targets") or [])
+
         self._paused: bool = False
         self._claimed: Set[str] = set()          # codes claimed this session
         self._claim_log: List[str] = []          # human-readable log of snipes
@@ -202,6 +211,13 @@ class VanitySniper:
             entry = f"discord.gg/{code} → guild {winner.guild_id} ({winner.latency_ms:.0f} ms)"
             self._claim_log.append(entry)
             log.info("[Sniper] ✅ %s", entry)
+            # Persist to JSON store
+            if self._sniper_data:
+                asyncio.create_task(
+                    self._sniper_data.add_history(
+                        code, winner.guild_id, winner.latency_ms, source_guild_id
+                    )
+                )
             if self._notifier:
                 asyncio.create_task(
                     self._notifier.notify_success(
@@ -213,8 +229,8 @@ class VanitySniper:
                 await self._auto_leave(source_guild_id)
         else:
             total_ms = (time.perf_counter() - t0) * 1000
-            first = next((r for r in results), None)
-            reason = (first.error if first else None) or "unknown"
+            first_result = next((r for r in results), None)
+            reason = (first_result.error if first_result else None) or "unknown"
             log.warning("[Sniper] ❌ Failed to claim '%s': %s", code, reason)
             if self._notifier:
                 asyncio.create_task(self._notifier.notify_failure(code, reason, total_ms))
