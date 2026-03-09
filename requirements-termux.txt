@@ -1,0 +1,7 @@
+# Termux-compatible requirements (no Rust/C extension builds needed)
+# orjson and PyYAML are intentionally excluded:
+#   - the bot falls back to stdlib json automatically when orjson is absent
+#   - the bot uses config.json (stdlib json) instead of config.yaml when PyYAML is absent
+discord.py-self>=1.9.2
+aiohttp>=3.9.0
+rich>=13.0.0

@@ -19,7 +19,24 @@ import time
 from typing import Any, Callable, Coroutine, Dict, Optional, Set
 
 import aiohttp
-import orjson
+
+try:
+    import orjson as _orjson
+    _json_loads = _orjson.loads
+
+    def _json_dumps_str(obj: dict) -> str:
+        return _orjson.dumps(obj).decode()
+
+except ImportError:
+    import json as _json_stdlib  # type: ignore[no-redef]
+
+    def _json_loads(data):  # type: ignore[misc]
+        if isinstance(data, (bytes, bytearray, memoryview)):
+            data = bytes(data).decode()
+        return _json_stdlib.loads(data)
+
+    def _json_dumps_str(obj: dict) -> str:  # type: ignore[misc]
+        return _json_stdlib.dumps(obj)
 
 log = logging.getLogger(__name__)
 
@@ -143,10 +160,10 @@ class GatewayMonitor:
         try:
             async for msg in self._ws:
                 if msg.type == aiohttp.WSMsgType.TEXT:
-                    await self._handle(orjson.loads(msg.data))
+                    await self._handle(_json_loads(msg.data))
                 elif msg.type == aiohttp.WSMsgType.BINARY:
                     import zlib
-                    await self._handle(orjson.loads(zlib.decompress(msg.data)))
+                    await self._handle(_json_loads(zlib.decompress(msg.data)))
                 elif msg.type in (aiohttp.WSMsgType.CLOSED, aiohttp.WSMsgType.ERROR):
                     log.debug("[%s] WS closed: %s", self.name, msg)
                     break
@@ -338,7 +355,6 @@ class GatewayMonitor:
     async def _send(self, payload: dict) -> None:
         if self._ws and not self._ws.closed:
             try:
-                # orjson encodes to bytes; send as a UTF-8 text frame
-                await self._ws.send_str(orjson.dumps(payload).decode())
+                await self._ws.send_str(_json_dumps_str(payload))
             except Exception as exc:
                 log.debug("[%s] send error: %s", self.name, exc)

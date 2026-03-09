@@ -2,6 +2,9 @@
 Config hot-reload watcher.
 Polls the config file every `interval` seconds and calls `on_change(new_cfg)`
 whenever the file's SHA-256 hash changes.
+
+Supports both YAML (config.yaml, requires PyYAML) and JSON (config.json,
+stdlib only — Termux-friendly).
 """
 from __future__ import annotations
 
@@ -10,8 +13,6 @@ import hashlib
 import logging
 from pathlib import Path
 from typing import Callable, Optional
-
-import yaml
 
 log = logging.getLogger(__name__)
 
@@ -59,8 +60,23 @@ class ConfigWatcher:
 
     def _load(self) -> Optional[dict]:
         try:
+            suffix = self._path.suffix.lower()
+            if suffix == ".json":
+                import json
+                with open(self._path) as f:
+                    return json.load(f)
+            # Default: treat as YAML
+            import yaml
             with open(self._path) as f:
                 return yaml.safe_load(f)
+        except ImportError:
+            # PyYAML not installed and the file is a YAML config — log clearly.
+            log.error(
+                "[ConfigWatcher] PyYAML is not installed; cannot hot-reload %s.\n"
+                "On Termux, use config.json instead of config.yaml.",
+                self._path,
+            )
+            return None
         except Exception as exc:
             log.error("[ConfigWatcher] parse error: %s", exc)
             return None
