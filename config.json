@@ -1,0 +1,1 @@
+{"tokens": ["fake_token"], "owner_id": 12345, "prefix": "!", "lavalink": {"nodes": [{"name": "Test", "host": "localhost", "port": 2333, "password": "pass"}]}, "settings": {"default_volume": 100, "max_queue_size": 500, "auto_disconnect": true, "disconnect_timeout": 300}, "sniper": false}
