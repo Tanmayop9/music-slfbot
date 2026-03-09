@@ -129,7 +129,7 @@ async def main() -> None:
 
     # ── Music bots ─────────────────────────────────────────────────────────────
     from core.bot import MusicBot
-    from cli.dashboard import Dashboard
+    from cli.dashboard import ConsoleCLI, Dashboard
 
     bots = []
     for token in tokens:
@@ -151,7 +151,9 @@ async def main() -> None:
 
     # ── Dashboard ──────────────────────────────────────────────────────────────
     dashboard = Dashboard(bots)
+    console_cli = ConsoleCLI(bots)
     dashboard.start()
+    console_cli.start()
 
     # ── Start everything ───────────────────────────────────────────────────────
     log.info(
@@ -174,6 +176,7 @@ async def main() -> None:
     finally:
         log.info("Shutting down…")
         dashboard.stop()
+        console_cli.stop()
         cleanup = [bot.close() for bot in bots]
         if sniper:
             cleanup.append(sniper.close())

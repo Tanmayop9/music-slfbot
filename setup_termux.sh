@@ -48,6 +48,9 @@ pip install "PyYAML>=6.0" --prefer-binary 2>/dev/null \
     || echo "  ✗ PyYAML not available — use config.json instead of config.yaml"
 
 # Core dependencies (always install these)
+# Note: discord.py-self is pinned to 1.9.2 — later versions require curl_cffi
+# which usually cannot be compiled on Termux ARM devices.
+echo "  Installing discord.py-self==1.9.2 and compatible aiohttp..."
 pip install -r requirements-termux.txt
 echo "  ✓ Core dependencies installed"
 

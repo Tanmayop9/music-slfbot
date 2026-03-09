@@ -2,6 +2,9 @@
 # orjson and PyYAML are intentionally excluded:
 #   - the bot falls back to stdlib json automatically when orjson is absent
 #   - the bot uses config.json (stdlib json) instead of config.yaml when PyYAML is absent
-discord.py-self>=1.9.2
-aiohttp>=3.9.0
+#
+# discord.py-self is pinned to 1.9.2 because 2.1.0+ requires curl_cffi,
+# a C/Rust extension that typically fails to build on Termux ARM devices.
+# 1.9.2 depends on aiohttp<3.8, so we let it set the compatible version.
+discord.py-self==1.9.2
 rich>=13.0.0
