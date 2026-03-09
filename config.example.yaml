@@ -1,21 +1,25 @@
-# ─────────────────────────────────────────────
-#  Music SelfBot — Example Configuration
-#  Copy this file to config.yaml and fill in your details.
-#  DO NOT commit config.yaml — it contains your tokens.
-# ─────────────────────────────────────────────
+# ─────────────────────────────────────────────────────────────────────────────
+#  Music SelfBot + Vanity Sniper — Example Configuration
+#  Copy this file to  config.yaml  and fill in your details.
+#  ⚠  DO NOT commit config.yaml — it contains your tokens.
+# ─────────────────────────────────────────────────────────────────────────────
 
-# Discord user tokens (selfbot accounts)
-# Add as many as you need — one bot per token.
+# ── Owner ──────────────────────────────────────────────────────────────────
+# Your Discord user ID.  ONLY messages from this account will trigger commands
+# (music AND sniper).  Right-click your name → "Copy User ID" (Dev-Mode on).
+owner_id: 123456789012345678
+
+# ── Music Bot — selfbot tokens ─────────────────────────────────────────────
+# One entry per account.  All accounts respond to commands from owner_id.
 tokens:
   - "YOUR_DISCORD_USER_TOKEN_1"
   # - "YOUR_DISCORD_USER_TOKEN_2"
-  # - "YOUR_DISCORD_USER_TOKEN_3"
 
-# Command prefix
+# Command prefix (applies to both music and sniper commands)
 prefix: "!"
 
-# Lavalink nodes — multi-node failover is built in.
-# The bot always picks the least-loaded available node.
+# ── Lavalink nodes ─────────────────────────────────────────────────────────
+# Multi-node failover — the bot always picks the least-loaded available node.
 lavalink:
   nodes:
     - name: "Node-1"
@@ -42,9 +46,56 @@ lavalink:
       password: "techpoint"
       secure: true
 
-# General settings
+# ── Music bot settings ─────────────────────────────────────────────────────
 settings:
   default_volume: 100          # 0-200
-  max_queue_size: 500          # max tracks in queue per guild
+  max_queue_size: 500          # max tracks per guild queue
   auto_disconnect: true        # leave voice when queue empties
-  disconnect_timeout: 300      # seconds of inactivity before leaving
+  disconnect_timeout: 300      # seconds of inactivity before auto-disconnect
+
+# ── Vanity Sniper ──────────────────────────────────────────────────────────
+# Leave this section out entirely if you don't need the sniper.
+sniper:
+
+  # Accounts used for monitoring AND claiming.
+  # Each account must already be a member of the guilds it will monitor.
+  accounts:
+    - name: "Sniper-1"
+      token: "YOUR_DISCORD_USER_TOKEN_FOR_SNIPER"
+      # Guilds where this account will TRY to claim a sniped vanity.
+      # The account must have Manage Server permission in each guild.
+      claim_guilds:
+        - id: 987654321098765432    # Replace with your guild ID
+        # - id: 111222333444555666  # Add more claim targets
+
+    # Add more accounts for parallel monitoring / claiming:
+    # - name: "Sniper-2"
+    #   token: "ANOTHER_TOKEN"
+    #   claim_guilds:
+    #     - id: 987654321098765432
+
+  # Vanity codes to watch.  Leave empty ( [] ) to snipe ANY vanity that drops.
+  targets:
+    - "example-vanity"
+    # - "another-code"
+
+  # HTTP webhook URL for snipe notifications (optional).
+  webhook_url: ""   # e.g. "https://discord.com/api/webhooks/ID/TOKEN"
+
+  # Leave the source guild automatically after a successful snipe.
+  auto_leave: false
+
+  # HTTP-CONNECT proxy list (optional).
+  # Round-robin assigned to accounts.  Supports http://user:pass@host:port
+  proxies: []
+  # proxies:
+  #   - "http://user:pass@proxy1.example.com:8080"
+  #   - "http://user:pass@proxy2.example.com:8080"
+
+  # MFA / 2FA bypass (only needed if your account has 2FA enabled).
+  mfa:
+    enabled: false
+    # Either provide your TOTP secret (base32, from authenticator app setup):
+    totp_secret: ""
+    # OR your account password (used as MFA authorization fallback):
+    password: ""
