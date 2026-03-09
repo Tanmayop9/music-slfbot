@@ -58,6 +58,47 @@ python main.py
 
 ---
 
+## Termux (Android) Installation
+
+Run the one-shot setup script — it handles everything automatically:
+
+```bash
+git clone https://github.com/Tanmayop9/music-slfbot
+cd music-slfbot
+bash setup_termux.sh
+```
+
+The script:
+- Installs Python and SSL certificates via `pkg`
+- Tries to install `orjson` and `PyYAML` with pre-built binaries (optional)
+- Installs the core dependencies (`discord.py-self`, `aiohttp`, `rich`)
+- Creates `config.json` from the template
+
+Then edit `config.json` with your tokens and run:
+
+```bash
+python main.py
+```
+
+### Why JSON config on Termux?
+
+`PyYAML` requires a C extension that may fail to build on some Android/ARM
+devices.  The bot therefore supports **`config.json`** as a zero-dependency
+alternative — it uses only Python's built-in `json` module.
+
+| File | When to use |
+|---|---|
+| `config.yaml` | Desktop / server (requires `PyYAML`) |
+| `config.json` | Termux / Android (built-in `json`, no extra deps) |
+
+Both formats are identical in structure — copy the right example file and fill
+in your details.
+
+> **Note on `orjson`:** the bot also falls back to stdlib `json` automatically
+> if `orjson` is not installed, so no code changes are needed on Termux.
+
+---
+
 ## Configuration (`config.yaml`)
 
 ```yaml
@@ -85,20 +126,23 @@ settings:
   auto_disconnect: true
   disconnect_timeout: 300
 
-sniper:           # remove this entire block to disable the sniper
-  accounts:
-    - name: "Sniper-1"
-      token: "YOUR_SNIPER_TOKEN"
-      claim_guilds:
-        - id: 987654321098765432
-  targets: []           # empty = snipe everything; or list specific codes
-  webhook_url: ""
-  auto_leave: false
-  proxies: []
-  mfa:
-    enabled: false
-    totp_secret: ""     # base32 secret from authenticator app setup
-    password: ""
+sniper: false     # set to false to disable; replace with a config block to enable
+
+# Example sniper config (replace the line above):
+# sniper:
+#   accounts:
+#     - name: "Sniper-1"
+#       token: "YOUR_SNIPER_TOKEN"
+#       claim_guilds:
+#         - id: 987654321098765432
+#   targets: []           # empty = snipe everything; or list specific codes
+#   webhook_url: ""
+#   auto_leave: false
+#   proxies: []
+#   mfa:
+#     enabled: false
+#     totp_secret: ""     # base32 secret from authenticator app setup
+#     password: ""
 ```
 
 ---
@@ -177,7 +221,9 @@ dz:query        Deezer
 
 ## JSON Data Storage
 
-All persistent data is written atomically to the `data/` folder using **orjson** (10–20× faster than Python's stdlib `json`):
+All persistent data is written atomically to the `data/` folder.  
+`orjson` is used when available (10–20× faster than stdlib `json`); the bot falls
+back to Python's built-in `json` automatically — no configuration needed.
 
 | File | Contents |
 |---|---|
@@ -193,8 +239,8 @@ All persistent data is written atomically to the `data/` folder using **orjson**
 ## Architecture
 
 ```
-main.py                    ← combined entry point
-├── storage/               ← orjson-backed persistent key-value stores
+main.py                    ← combined entry point (config.yaml or config.json)
+├── storage/               ← JSON persistent key-value stores (orjson or stdlib json)
 │   ├── store.py           ← JSONStore (atomic writes, in-memory cache)
 │   ├── guild_settings.py  ← per-guild volume / loop
 │   └── sniper_data.py     ← targets + claim history
@@ -202,7 +248,7 @@ main.py                    ← combined entry point
 │   ├── bot.py             ← discord.py-self client (owner-only, voice forwarding)
 │   └── commands.py        ← all music + sniper command handlers
 ├── lavalink/
-│   ├── node.py            ← Lavalink v4 WebSocket + REST (orjson)
+│   ├── node.py            ← Lavalink v4 WebSocket + REST
 │   ├── pool.py            ← node pool / failover
 │   └── models.py          ← Track, Playlist, LoadResult
 ├── music/
@@ -210,11 +256,11 @@ main.py                    ← combined entry point
 │   ├── queue.py           ← Queue with loop modes
 │   └── filters.py         ← 14 filter presets
 ├── sniper/
-│   ├── gateway.py         ← Discord gateway monitor (orjson, RESUME support)
+│   ├── gateway.py         ← Discord gateway monitor (RESUME support)
 │   ├── claimer.py         ← pre-warmed REST claimer (TOTP, proxy)
 │   ├── core.py            ← VanitySniper orchestrator
 │   ├── webhook.py         ← Discord webhook notifications
-│   └── watcher.py         ← config hot-reload
+│   └── watcher.py         ← config hot-reload (yaml or json)
 ├── cli/
 │   └── dashboard.py       ← Rich live terminal dashboard
 └── sniper.py              ← standalone sniper entry point

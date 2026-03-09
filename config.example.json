@@ -1,0 +1,54 @@
+{
+  "_comment": "Copy this file to config.json and fill in your details. Used on Termux where PyYAML is unavailable.",
+
+  "owner_id": 123456789012345678,
+
+  "tokens": [
+    "YOUR_DISCORD_USER_TOKEN_1"
+  ],
+
+  "prefix": "!",
+
+  "lavalink": {
+    "nodes": [
+      {
+        "name": "Node-1",
+        "host": "lavalink.devamop.in",
+        "port": 443,
+        "password": "DevamOP",
+        "secure": true
+      },
+      {
+        "name": "Node-2",
+        "host": "lavalink.jirayu.net",
+        "port": 13592,
+        "password": "youshallnotpass",
+        "secure": false
+      },
+      {
+        "name": "Node-3",
+        "host": "lavalink.oops.wtf",
+        "port": 443,
+        "password": "www.freelavalink.ga",
+        "secure": true
+      },
+      {
+        "name": "Node-4",
+        "host": "lavalink.techpoint.world",
+        "port": 443,
+        "password": "techpoint",
+        "secure": true
+      }
+    ]
+  },
+
+  "settings": {
+    "default_volume": 100,
+    "max_queue_size": 500,
+    "auto_disconnect": true,
+    "disconnect_timeout": 300
+  },
+
+  "_comment_sniper": "Set sniper to false to disable it. Replace with a config object to enable (see config.example.yaml for all options).",
+  "sniper": false
+}

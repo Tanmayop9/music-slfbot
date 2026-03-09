@@ -470,7 +470,8 @@ async def _cmd_sniper(bot, message, args):
     """Dispatcher for  !sniper <sub>  commands."""
     if bot.sniper is None:
         await message.channel.send(
-            "❌ Sniper is not enabled — add a `sniper:` section to `config.yaml` and restart."
+            "❌ Sniper is not enabled — set `sniper:` to a config block in `config.yaml` "
+            "(or `config.json`) and restart. Use `sniper: false` to keep it disabled."
         )
         return
 

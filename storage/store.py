@@ -1,10 +1,9 @@
 """
-Atomic async JSON key-value store powered by orjson.
+Atomic async JSON key-value store.
 
-Why orjson?
-  • 10-20× faster than stdlib json on encode/decode
-  • Native bytes output — zero intermediate string allocation
-  • Handles datetime, dataclasses, numpy arrays out of the box
+Uses orjson when available (10-20× faster than stdlib, native bytes output),
+and falls back to stdlib json automatically — making it work on Termux and
+any environment where orjson cannot be installed.
 
 Design choices for speed and safety:
   • All data kept in a plain dict in memory → O(1) get with zero I/O
@@ -23,7 +22,23 @@ import tempfile
 from pathlib import Path
 from typing import Any, Dict, Optional
 
-import orjson
+try:
+    import orjson as _orjson
+
+    def _loads(data: bytes) -> dict:
+        return _orjson.loads(data)
+
+    def _dumps(obj: dict) -> bytes:
+        return _orjson.dumps(obj, option=_orjson.OPT_INDENT_2 | _orjson.OPT_SORT_KEYS)
+
+except ImportError:
+    import json as _json_stdlib  # type: ignore[no-redef]
+
+    def _loads(data: bytes) -> dict:  # type: ignore[misc]
+        return _json_stdlib.loads(data.decode() if isinstance(data, (bytes, bytearray)) else data)
+
+    def _dumps(obj: dict) -> bytes:  # type: ignore[misc]
+        return _json_stdlib.dumps(obj, indent=2, sort_keys=True).encode()
 
 log = logging.getLogger(__name__)
 
@@ -56,7 +71,7 @@ class JSONStore:
             return
         try:
             raw: bytes = await asyncio.to_thread(self._path.read_bytes)
-            self._data = orjson.loads(raw) if raw.strip() else {}
+            self._data = _loads(raw) if raw.strip() else {}
         except Exception as exc:
             log.error("[JSONStore] Failed to load %s: %s — starting empty", self._path, exc)
             self._data = {}
@@ -106,11 +121,8 @@ class JSONStore:
     # ──────────────────────────────────────────────────────────────────────────
 
     async def _flush(self) -> None:
-        """Atomically serialise self._data to disk using orjson."""
-        payload: bytes = orjson.dumps(
-            self._data,
-            option=orjson.OPT_INDENT_2 | orjson.OPT_SORT_KEYS,
-        )
+        """Atomically serialise self._data to disk."""
+        payload: bytes = _dumps(self._data)
         await asyncio.to_thread(self._atomic_write, payload)
 
     def _atomic_write(self, data: bytes) -> None:

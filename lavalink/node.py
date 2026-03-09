@@ -8,7 +8,17 @@ import logging
 from typing import Any, Callable, Dict, List, Optional
 
 import aiohttp
-import orjson
+
+try:
+    import orjson as _orjson
+    _json_loads = _orjson.loads
+except ImportError:
+    import json as _json_stdlib  # type: ignore[no-redef]
+
+    def _json_loads(data):  # type: ignore[misc]
+        if isinstance(data, (bytes, bytearray, memoryview)):
+            data = bytes(data).decode()
+        return _json_stdlib.loads(data)
 
 from .models import LoadResult, LoadType, PlaylistInfo, Track
 
@@ -135,7 +145,7 @@ class LavalinkNode:
         try:
             async for msg in self._ws:
                 if msg.type == aiohttp.WSMsgType.TEXT:
-                    await self._dispatch(orjson.loads(msg.data))
+                    await self._dispatch(_json_loads(msg.data))
                 elif msg.type in (aiohttp.WSMsgType.CLOSED, aiohttp.WSMsgType.ERROR):
                     break
         except Exception as exc:

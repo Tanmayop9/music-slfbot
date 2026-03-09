@@ -10,8 +10,6 @@ import logging
 import sys
 from pathlib import Path
 
-import yaml
-
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
@@ -25,14 +23,44 @@ logging.getLogger("aiohttp").setLevel(logging.WARNING)
 
 
 def _load_config() -> dict:
-    path = Path("config.yaml")
-    if not path.exists():
-        log.error("config.yaml not found — copy config.example.yaml and fill in your details.")
-        sys.exit(1)
-    with open(path) as f:
-        cfg = yaml.safe_load(f)
-    cfg["_config_path"] = str(path)
-    return cfg
+    """Load config from config.yaml (preferred) or config.json (Termux fallback)."""
+    yaml_path = Path("config.yaml")
+    json_path = Path("config.json")
+
+    if yaml_path.exists():
+        try:
+            import yaml
+            with open(yaml_path) as f:
+                cfg = yaml.safe_load(f)
+            cfg["_config_path"] = str(yaml_path)
+            return cfg
+        except ImportError:
+            log.warning(
+                "PyYAML is not installed — falling back to JSON config.\n"
+                "On Termux: cp config.example.json config.json  then fill in your details."
+            )
+
+    if json_path.exists():
+        import json
+        with open(json_path) as f:
+            cfg = json.load(f)
+        cfg["_config_path"] = str(json_path)
+        return cfg
+
+    if yaml_path.exists():
+        log.error(
+            "config.yaml found but PyYAML is not installed.\n"
+            "Install it:  pip install PyYAML\n"
+            "Or on Termux use JSON config:  cp config.example.json config.json"
+        )
+    else:
+        log.error(
+            "No config file found.\n"
+            "Copy config.example.yaml → config.yaml\n"
+            "  (or config.example.json → config.json on Termux)\n"
+            "and fill in your details."
+        )
+    sys.exit(1)
 
 
 async def main() -> None:

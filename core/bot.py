@@ -15,7 +15,17 @@ import logging
 from typing import TYPE_CHECKING, Any, Dict, List, Optional
 
 import discord
-import orjson
+
+try:
+    import orjson as _orjson
+    _json_loads = _orjson.loads
+except ImportError:
+    import json as _json_stdlib  # type: ignore[no-redef]
+
+    def _json_loads(data):  # type: ignore[misc]
+        if isinstance(data, (bytes, bytearray, memoryview)):
+            data = bytes(data).decode()
+        return _json_stdlib.loads(data)
 
 from lavalink.pool import NodePool
 from music.player import MusicPlayer
@@ -147,9 +157,9 @@ class MusicBot(discord.Client):
 
     async def on_socket_raw_receive(self, msg: Any) -> None:
         """Intercept raw gateway messages to capture VOICE_SERVER_UPDATE."""
-        # orjson.loads accepts bytes and str
+        # _json_loads accepts bytes and str
         try:
-            data: dict = orjson.loads(msg)
+            data: dict = _json_loads(msg)
         except Exception:
             return
 
