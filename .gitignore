@@ -1,5 +1,6 @@
 # Secrets / config
 config.yaml
+config.json
 
 # Logs
 *.log
