@@ -140,6 +140,14 @@ class MusicBot(discord.Client):
                 log.debug("Client close error during reconnect cleanup: %s", _exc)
             self.clear()
 
+            # discord.py-self v2.x leaves http._started=True and self.loop=MISSING
+            # after close()+clear(), which prevents startup() from recreating
+            # the HTTP sessions on the next start() call, causing AttributeError.
+            # Reset both so the next login() fully re-initialises async state.
+            # NOTE: relies on discord.py-self>=1.9 internals; review on upgrades.
+            self.http._started = False
+            await self._async_setup_hook()
+
             await asyncio.sleep(retry_delay)
             retry_delay = min(retry_delay * 2, 300)
 

@@ -3,9 +3,7 @@
 
   "owner_id": 123456789012345678,
 
-  "tokens": [
-    "YOUR_DISCORD_USER_TOKEN_1"
-  ],
+  "token": "YOUR_DISCORD_USER_TOKEN",
 
   "prefix": "!",
 

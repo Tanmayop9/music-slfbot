@@ -9,11 +9,9 @@
 # (music AND sniper).  Right-click your name → "Copy User ID" (Dev-Mode on).
 owner_id: 123456789012345678
 
-# ── Music Bot — selfbot tokens ─────────────────────────────────────────────
-# One entry per account.  All accounts respond to commands from owner_id.
-tokens:
-  - "YOUR_DISCORD_USER_TOKEN_1"
-  # - "YOUR_DISCORD_USER_TOKEN_2"
+# ── Music Bot — selfbot token ──────────────────────────────────────────────
+# Your Discord user account token.
+token: "YOUR_DISCORD_USER_TOKEN"
 
 # Command prefix (applies to both music and sniper commands)
 prefix: "!"

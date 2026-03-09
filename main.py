@@ -1,11 +1,11 @@
 """
-Combined entry point — starts the music selfbot(s) AND the vanity sniper
+Combined entry point — starts the music selfbot AND the vanity sniper
 in a single asyncio event loop.
 
 Boot order:
   1. Load JSON stores (guild_settings, sniper_data) — in-memory after load
   2. Build VanitySniper (loads persisted targets from JSON)
-  3. Build MusicBot instances (pass owner_id, guild_settings, sniper ref)
+  3. Build MusicBot instance (pass owner_id, guild_settings, sniper ref)
   4. Start everything concurrently
 """
 from __future__ import annotations
@@ -79,9 +79,9 @@ async def main() -> None:
     config = _load_config()
 
     # ── Required fields ────────────────────────────────────────────────────────
-    tokens = config.get("tokens") or []
-    if not tokens:
-        log.error("No tokens found in config.yaml under 'tokens:'!")
+    token = config.get("token", "").strip()
+    if not token:
+        log.error("No token found in config — set 'token' to your Discord user token.")
         sys.exit(1)
 
     node_configs = config.get("lavalink", {}).get("nodes") or []
@@ -127,41 +127,37 @@ async def main() -> None:
         from sniper.core import VanitySniper
         sniper = VanitySniper(config, sniper_data=sniper_data)
 
-    # ── Music bots ─────────────────────────────────────────────────────────────
+    # ── Music bot ──────────────────────────────────────────────────────────────
     from core.bot import MusicBot
     from cli.dashboard import ConsoleCLI
 
-    bots = []
-    for token in tokens:
-        bot = MusicBot(
-            token=token,
-            prefix=prefix,
-            node_configs=node_configs,
-            owner_id=owner_id,
-            default_volume=default_volume,
-            max_queue_size=max_queue_size,
-            auto_disconnect=auto_disconnect,
-            disconnect_timeout=disconnect_timeout,
-            guild_settings=guild_settings,
-            sniper=sniper,
-        )
-        # Attach sniper_data so !sniper commands can access the JSON store
-        bot._sniper_data = sniper_data
-        bots.append(bot)
+    bot = MusicBot(
+        token=token,
+        prefix=prefix,
+        node_configs=node_configs,
+        owner_id=owner_id,
+        default_volume=default_volume,
+        max_queue_size=max_queue_size,
+        auto_disconnect=auto_disconnect,
+        disconnect_timeout=disconnect_timeout,
+        guild_settings=guild_settings,
+        sniper=sniper,
+    )
+    # Attach sniper_data so !sniper commands can access the JSON store
+    bot._sniper_data = sniper_data
 
     # ── Console ────────────────────────────────────────────────────────────────
-    console_cli = ConsoleCLI(bots)
+    console_cli = ConsoleCLI([bot])
     console_cli.start()
 
     # ── Start everything ───────────────────────────────────────────────────────
     log.info(
-        "Starting %d bot account(s) | owner_id=%s | sniper=%s",
-        len(bots),
+        "Starting bot | owner_id=%s | sniper=%s",
         owner_id or "own messages",
         "enabled" if sniper else "disabled",
     )
 
-    tasks = [asyncio.create_task(bot.start_bot()) for bot in bots]
+    tasks = [asyncio.create_task(bot.start_bot())]
     if sniper:
         tasks.append(
             asyncio.create_task(sniper.start(config_path=config.get("_config_path", "config.yaml")))
@@ -174,7 +170,7 @@ async def main() -> None:
     finally:
         log.info("Shutting down…")
         console_cli.stop()
-        cleanup = [bot.close() for bot in bots]
+        cleanup = [bot.close()]
         if sniper:
             cleanup.append(sniper.close())
         await asyncio.gather(*cleanup, return_exceptions=True)
