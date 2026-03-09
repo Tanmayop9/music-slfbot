@@ -1,7 +1,7 @@
 # 🎵 music-slfbot
 
 The ultimate multi-account Discord music selfbot + vanity URL sniper.  
-Written in Python — built for power and speed.
+Written in **JavaScript (Node.js)** — built for power and speed.
 
 ---
 
@@ -15,7 +15,7 @@ Written in Python — built for power and speed.
 | Multi-source search | YouTube, Spotify, SoundCloud, JioSaavn, Apple Music, Deezer |
 | 14 audio filters | nightcore, bassboost, 8d, lofi, earrape, chipmunk, vaporwave, karaoke, tremolo, vibrato, rotation, distortion, soft, pop |
 | Queue management | skip, shuffle, loop (track/queue), clear, move, remove |
-| Live CLI dashboard | Real-time Rich table of all bots and their players |
+| Live CLI dashboard | Interactive terminal console for all bots |
 | Volume & seek | 0–200 % volume; seek by seconds or `MM:SS` |
 | Voice-channel status | Auto-updates to "🎵 Now Playing: …" |
 | Persistent settings | Per-guild volume and loop mode survive restarts (JSON store) |
@@ -27,7 +27,6 @@ Written in Python — built for power and speed.
 | Real-time monitoring | Discord gateway WebSocket — zero polling delay |
 | Instant claim | `GUILD_UPDATE` / `GUILD_DELETE` triggers parallel claim attempts |
 | MFA / 2FA bypass | TOTP (RFC 6238) generated inline; or password fallback |
-| Proxy support | HTTP CONNECT tunnelling per account |
 | Parallel claim mode | Every claimer fires simultaneously; fastest win |
 | Pre-warmed connections | TCP + TLS open before the race starts |
 | Auto leave | Optionally leave source guild after a successful snipe |
@@ -39,8 +38,8 @@ Written in Python — built for power and speed.
 
 ## Requirements
 
-- Python ≥ 3.11  
-- A running Lavalink v4 server (public nodes provided in the example config)  
+- Node.js >= 18.0.0
+- A running Lavalink v4 server (public nodes provided in the example config)
 - Discord user token(s)
 
 ---
@@ -50,52 +49,11 @@ Written in Python — built for power and speed.
 ```bash
 git clone https://github.com/Tanmayop9/music-slfbot
 cd music-slfbot
-pip install -r requirements.txt
+npm install
 cp config.example.yaml config.yaml
 # Edit config.yaml — fill in your tokens and owner_id
-python main.py
+node main.js
 ```
-
----
-
-## Termux (Android) Installation
-
-Run the one-shot setup script — it handles everything automatically:
-
-```bash
-git clone https://github.com/Tanmayop9/music-slfbot
-cd music-slfbot
-bash setup_termux.sh
-```
-
-The script:
-- Installs Python and SSL certificates via `pkg`
-- Tries to install `orjson` and `PyYAML` with pre-built binaries (optional)
-- Installs the core dependencies (`discord.py-self`, `aiohttp`, `rich`)
-- Creates `config.json` from the template
-
-Then edit `config.json` with your tokens and run:
-
-```bash
-python main.py
-```
-
-### Why JSON config on Termux?
-
-`PyYAML` requires a C extension that may fail to build on some Android/ARM
-devices.  The bot therefore supports **`config.json`** as a zero-dependency
-alternative — it uses only Python's built-in `json` module.
-
-| File | When to use |
-|---|---|
-| `config.yaml` | Desktop / server (requires `PyYAML`) |
-| `config.json` | Termux / Android (built-in `json`, no extra deps) |
-
-Both formats are identical in structure — copy the right example file and fill
-in your details.
-
-> **Note on `orjson`:** the bot also falls back to stdlib `json` automatically
-> if `orjson` is not installed, so no code changes are needed on Termux.
 
 ---
 
@@ -105,9 +63,8 @@ in your details.
 # YOUR Discord user ID (right-click name → Copy User ID, Dev Mode on)
 owner_id: 123456789012345678
 
-# One selfbot token per line
-tokens:
-  - "YOUR_TOKEN_HERE"
+# Your Discord user account token
+token: "YOUR_DISCORD_USER_TOKEN"
 
 prefix: "!"
 
@@ -118,7 +75,7 @@ lavalink:
       port: 443
       password: "DevamOP"
       secure: true
-    # … 3 more nodes in config.example.yaml
+    # ... 3 more nodes in config.example.yaml
 
 settings:
   default_volume: 100
@@ -127,22 +84,6 @@ settings:
   disconnect_timeout: 300
 
 sniper: false     # set to false to disable; replace with a config block to enable
-
-# Example sniper config (replace the line above):
-# sniper:
-#   accounts:
-#     - name: "Sniper-1"
-#       token: "YOUR_SNIPER_TOKEN"
-#       claim_guilds:
-#         - id: 987654321098765432
-#   targets: []           # empty = snipe everything; or list specific codes
-#   webhook_url: ""
-#   auto_leave: false
-#   proxies: []
-#   mfa:
-#     enabled: false
-#     totp_secret: ""     # base32 secret from authenticator app setup
-#     password: ""
 ```
 
 ---
@@ -151,10 +92,10 @@ sniper: false     # set to false to disable; replace with a config block to enab
 
 ```bash
 # Music bot + sniper (combined)
-python main.py
+node main.js
 
 # Sniper only
-python sniper.py
+node sniper.js
 ```
 
 ---
@@ -198,7 +139,7 @@ dz:query        Deezer
 
 ### Audio filters
 
-`nightcore` `bassboost` `8d` `lofi` `earrape` `chipmunk` `vaporwave`  
+`nightcore` `bassboost` `8d` `lofi` `earrape` `chipmunk` `vaporwave`
 `karaoke` `tremolo` `vibrato` `rotation` `distortion` `soft` `pop`
 
 ---
@@ -221,17 +162,15 @@ dz:query        Deezer
 
 ## JSON Data Storage
 
-All persistent data is written atomically to the `data/` folder.  
-`orjson` is used when available (10–20× faster than stdlib `json`); the bot falls
-back to Python's built-in `json` automatically — no configuration needed.
+All persistent data is written atomically to the `data/` folder.
 
 | File | Contents |
 |---|---|
 | `data/guild_settings.json` | Per-guild volume and loop mode |
 | `data/sniper.json` | Sniper watch list and full claim history |
 
-- Reads are **O(1) in-memory** — zero disk I/O after startup.  
-- Writes are atomic (`write → temp file → os.replace`) — the file is never corrupt.  
+- Reads are **O(1) in-memory** — zero disk I/O after startup.
+- Writes are atomic (`write -> temp file -> rename`) — the file is never corrupt.
 - The `data/` directory is git-ignored.
 
 ---
@@ -239,31 +178,34 @@ back to Python's built-in `json` automatically — no configuration needed.
 ## Architecture
 
 ```
-main.py                    ← combined entry point (config.yaml or config.json)
-├── storage/               ← JSON persistent key-value stores (orjson or stdlib json)
-│   ├── store.py           ← JSONStore (atomic writes, in-memory cache)
-│   ├── guild_settings.py  ← per-guild volume / loop
-│   └── sniper_data.py     ← targets + claim history
-├── core/
-│   ├── bot.py             ← discord.py-self client (owner-only, voice forwarding)
-│   └── commands.py        ← all music + sniper command handlers
-├── lavalink/
-│   ├── node.py            ← Lavalink v4 WebSocket + REST
-│   ├── pool.py            ← node pool / failover
-│   └── models.py          ← Track, Playlist, LoadResult
-├── music/
-│   ├── player.py          ← MusicPlayer (queue advancement, filters, seek)
-│   ├── queue.py           ← Queue with loop modes
-│   └── filters.py         ← 14 filter presets
-├── sniper/
-│   ├── gateway.py         ← Discord gateway monitor (RESUME support)
-│   ├── claimer.py         ← pre-warmed REST claimer (TOTP, proxy)
-│   ├── core.py            ← VanitySniper orchestrator
-│   ├── webhook.py         ← Discord webhook notifications
-│   └── watcher.py         ← config hot-reload (yaml or json)
-├── cli/
-│   └── dashboard.py       ← Rich live terminal dashboard
-└── sniper.py              ← standalone sniper entry point
+main.js                      <- combined entry point (config.yaml or config.json)
+├── src/
+│   ├── config.js            <- config loader (YAML / JSON)
+│   ├── logger.js            <- simple logger (stdout + file)
+│   ├── storage/             <- JSON persistent key-value stores
+│   │   ├── store.js         <- JSONStore (atomic writes, in-memory cache)
+│   │   ├── guildSettings.js <- per-guild volume / loop
+│   │   └── sniperData.js    <- targets + claim history
+│   ├── core/
+│   │   ├── bot.js           <- discord.js-selfbot-v13 client (owner-only, voice forwarding)
+│   │   └── commands.js      <- all music + sniper command handlers
+│   ├── lavalink/
+│   │   ├── node.js          <- Lavalink v4 WebSocket + REST
+│   │   ├── pool.js          <- node pool / failover
+│   │   └── models.js        <- Track, Playlist, LoadResult
+│   ├── music/
+│   │   ├── player.js        <- MusicPlayer (queue advancement, filters, seek)
+│   │   ├── queue.js         <- Queue with loop modes
+│   │   └── filters.js       <- 14 filter presets
+│   ├── sniper/
+│   │   ├── gateway.js       <- Discord gateway monitor (RESUME support)
+│   │   ├── claimer.js       <- pre-warmed REST claimer (TOTP, proxy)
+│   │   ├── core.js          <- VanitySniper orchestrator
+│   │   ├── webhook.js       <- Discord webhook notifications
+│   │   └── watcher.js       <- config hot-reload (yaml or json)
+│   └── cli/
+│       └── dashboard.js     <- interactive terminal console
+└── sniper.js                <- standalone sniper entry point
 ```
 
 ---
