@@ -7,4 +7,3 @@
 # a C/Rust extension that typically fails to build on Termux ARM devices.
 # 1.9.2 depends on aiohttp<3.8, so we let it set the compatible version.
 discord.py-self==1.9.2
-rich>=13.0.0
