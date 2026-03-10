@@ -23,8 +23,10 @@
  */
 
 import readline from 'node:readline';
-import { LoadType } from '../lavalink/models.js';
+import { LoadType, Track, TrackInfo } from '../lavalink/models.js';
 import { createLogger } from '../logger.js';
+import { DirectPlayer } from '../ytdl/directPlayer.js';
+import { resolveWithYtdl } from '../ytdl/fallback.js';
 
 const log = createLogger('ConsoleCLI');
 
@@ -239,15 +241,65 @@ export class ConsoleCLI {
     if (!guildRef || !query) { console.log('Usage: play <guild> <song name or URL>'); return; }
     const { bot, guild } = this._findGuild(guildRef);
     if (!guild) return;
-    const player = bot.getPlayer(guild.id);
+    let player = bot.getPlayer(guild.id);
     if (!player?.connected) {
       console.log("Bot is not in a voice channel. Use 'join <guild> <channel>' first.");
       return;
     }
 
+    console.log(`Searching for '${query}'...`);
+
+    // ── Priority 1: DirectPlayer path (ytdl-core / yt-dlp) ───────────────────
+    // When joinVoice() was used (e.g. via the 'join' CLI command), the player is
+    // a DirectPlayer with no Lavalink node — use the ytdl fallback resolver.
+    if (player instanceof DirectPlayer) {
+      let ytdl = null;
+      try {
+        ytdl = await resolveWithYtdl(query, bot.ytdlConfig ?? {});
+      } catch (err) {
+        log.warn(`ytdl resolve failed: ${err.message}`);
+      }
+      if (ytdl) {
+        const info = new TrackInfo({
+          title:      ytdl.title,
+          author:     ytdl.author,
+          length:     ytdl.durationMs,
+          uri:        ytdl.watchUrl || ytdl.url,
+          identifier: ytdl.watchUrl || ytdl.url,
+          sourceName: 'ytdl',
+          isSeekable: false,
+          isStream:   false,
+        });
+        const track = new Track({ encoded: '', info, requester: 'console' });
+        if (!player.current) {
+          await player.play(track);
+          if (player.voiceChannelId) {
+            await bot.updateVoiceStatus(player.voiceChannelId, `Playing: ${track.info.title}`);
+          }
+          console.log(`Now playing: ${track.info.title} -- ${track.info.author}  [${track.durationStr}]`);
+        } else {
+          player.queue.add(track);
+          console.log(`Added to queue (#${player.queue.size}): ${track.info.title}`);
+        }
+        return;
+      }
+
+      // ytdl-core / yt-dlp could not resolve — try switching the session to Lavalink.
+      const voiceChannel = guild.channels.cache.get(player.voiceChannelId);
+      if (voiceChannel) {
+        const lavaPlayer = await bot.switchToLavalink(guild.id, voiceChannel);
+        if (lavaPlayer) player = lavaPlayer;
+      }
+    }
+
+    // ── Priority 2: Lavalink path ─────────────────────────────────────────────
+    if (!player.node) {
+      console.log('No results found and no Lavalink node is available.');
+      return;
+    }
+
     const identifier = (query.startsWith('http://') || query.startsWith('https://'))
       ? query : `ytsearch:${query}`;
-    console.log(`Searching for '${query}'...`);
 
     let result;
     try {

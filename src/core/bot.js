@@ -219,7 +219,7 @@ export class MusicBot extends Client {
     if (!sessionId || !token || !endpoint) return;
 
     const player = this.players.get(guildId);
-    if (!player) return;
+    if (!player || !player.node) return;
 
     try {
       await player.node.sendVoiceUpdate(guildId, sessionId, token, endpoint);
