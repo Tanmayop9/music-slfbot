@@ -9,9 +9,12 @@
     "sniper": "node sniper.js"
   },
   "dependencies": {
+    "@distube/ytdl-core": "^4.16.12",
     "debug": "^4.4.3",
     "discord.js-selfbot-v13": "^3.7.1",
     "js-yaml": "^4.1.1",
+    "libsodium-wrappers": "^0.8.2",
+    "opusscript": "^0.0.8",
     "ws": "^8.19.0"
   },
   "engines": {

@@ -11,7 +11,12 @@ Written in **JavaScript (Node.js)** — built for power and speed.
 | Feature | Details |
 |---|---|
 | Multi-token support | Run unlimited accounts in parallel |
-| Lavalink HQ audio | v4 protocol, multi-node failover (4 nodes) |
+| Lavalink HQ audio | v4 protocol, single configurable node |
+| @distube/ytdl-core backup | Automatic fallback when Lavalink fails — pure JS, no compilation, ideal for Termux |
+| yt-dlp backup | Secondary fallback CLI (`pip install yt-dlp`) for search + age-restricted content |
+| Direct voice fallback | When no Lavalink node is reachable, streams via `client.voice.joinChannel()` + `connection.playAudio()` (official discord.js-selfbot-v13 API) |
+| YouTube Data API v3 | Optional `ytdl.api_key` for higher-quality search results |
+| Cookie auth | Optional `ytdl.cookies` for age-restricted / login-required tracks |
 | Multi-source search | YouTube, Spotify, SoundCloud, JioSaavn, Apple Music, Deezer |
 | 14 audio filters | nightcore, bassboost, 8d, lofi, earrape, chipmunk, vaporwave, karaoke, tremolo, vibrato, rotation, distortion, soft, pop |
 | Queue management | skip, shuffle, loop (track/queue), clear, move, remove |
@@ -39,7 +44,7 @@ Written in **JavaScript (Node.js)** — built for power and speed.
 ## Requirements
 
 - Node.js >= 18.0.0
-- A running Lavalink v4 server (public nodes provided in the example config)
+- A running Lavalink v4 server (configured in `config.yaml`)
 - Discord user token(s)
 
 ---
@@ -51,9 +56,34 @@ git clone https://github.com/Tanmayop9/music-slfbot
 cd music-slfbot
 npm install
 cp config.example.yaml config.yaml
-# Edit config.yaml — fill in your tokens and owner_id
+# Edit config.yaml — fill in your token and owner_id
 node main.js
 ```
+
+### Termux (Android)
+
+```bash
+# 1. Install system packages
+pkg update && pkg install nodejs python ffmpeg git
+
+# 2. Clone & install JS deps  (opusscript + libsodium-wrappers included — no native compilation needed)
+git clone https://github.com/Tanmayop9/music-slfbot
+cd music-slfbot
+npm install
+
+# 3. Install yt-dlp (optional but recommended for backup search)
+pip install yt-dlp
+
+# 4. Configure
+cp config.example.yaml config.yaml
+nano config.yaml   # fill in token, owner_id, and optionally ytdl.api_key
+
+# 5. Keep the session alive and start
+termux-wake-lock
+node main.js
+```
+
+> **Tip:** Run `termux-wake-lock` before starting to prevent Android from killing the process.
 
 ---
 
@@ -70,12 +100,11 @@ prefix: "!"
 
 lavalink:
   nodes:
-    - name: "Node-1"
-      host: "lavalink.devamop.in"
-      port: 443
-      password: "DevamOP"
-      secure: true
-    # ... 3 more nodes in config.example.yaml
+    - name: "Node-3"
+      host: "n1.pulledtheirlife.support"
+      port: 2015
+      password: "2MPHosting"
+      secure: false
 
 settings:
   default_volume: 100
@@ -83,8 +112,21 @@ settings:
   auto_disconnect: true
   disconnect_timeout: 300
 
+# yt-dlp / @distube/ytdl-core backup (optional)
+ytdl:
+  api_key: ""    # YouTube Data API v3 key — improves search quality
+  cookies: ""    # Raw YouTube Cookie header — unlocks age-restricted tracks
+
 sniper: false     # set to false to disable; replace with a config block to enable
 ```
+
+### ytdl backup explained
+
+| Situation | What happens |
+|---|---|
+| Lavalink finds the track | Normal Lavalink playback |
+| Lavalink returns no results | Bot tries `@distube/ytdl-core` → yt-dlp CLI to find a YouTube URL and re-feeds it to Lavalink |
+| No Lavalink node reachable | Bot falls back to `client.voice.joinChannel()` + `connection.playAudio()` streaming via `@distube/ytdl-core` (official discord.js-selfbot-v13 API) |
 
 ---
 

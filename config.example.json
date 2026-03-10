@@ -19,6 +19,12 @@
     ]
   },
 
+  "_comment_ytdl": "yt-dlp / @distube/ytdl-core backup. Used when Lavalink fails. Termux: pkg install python ffmpeg && pip install yt-dlp",
+  "ytdl": {
+    "api_key": "",
+    "cookies": ""
+  },
+
   "settings": {
     "default_volume": 100,
     "max_queue_size": 500,

@@ -5,16 +5,20 @@
  *   - Only process commands from the configured owner_id.
  *   - Receive Discord gateway messages (voice state / server updates).
  *   - Forward voice credentials to Lavalink so it can stream audio.
- *   - Manage per-guild MusicPlayer instances, restoring saved settings on create.
+ *   - Manage per-guild MusicPlayer / DirectPlayer instances.
+ *   - Fall back to the official client.voice.joinChannel() + @distube/ytdl-core
+ *     path (as shown in the discord.js-selfbot-v13 PlayAudio.js example) when
+ *     no Lavalink node is reachable.
  *   - Update voice-channel status with the currently-playing track.
  */
 
 import { Client } from 'discord.js-selfbot-v13';
-import { NodePool }     from '../lavalink/pool.js';
-import { MusicPlayer }  from '../music/player.js';
-import { LoopMode }     from '../music/queue.js';
-import { handleCommand } from './commands.js';
-import { createLogger } from '../logger.js';
+import { NodePool }       from '../lavalink/pool.js';
+import { MusicPlayer }    from '../music/player.js';
+import { DirectPlayer }   from '../ytdl/directPlayer.js';
+import { LoopMode }       from '../music/queue.js';
+import { handleCommand }  from './commands.js';
+import { createLogger }   from '../logger.js';
 
 const log = createLogger('MusicBot');
 
@@ -29,6 +33,7 @@ export class MusicBot extends Client {
    * @param {number} [opts.maxQueueSize]
    * @param {boolean} [opts.autoDisconnect]
    * @param {number} [opts.disconnectTimeout]
+   * @param {object} [opts.ytdlConfig]          yt-dlp / ytdl-core options ({ apiKey, cookies })
    * @param {import('../storage/guildSettings.js').GuildSettings} [opts.guildSettings]
    * @param {import('../sniper/core.js').VanitySniper} [opts.sniper]
    */
@@ -41,6 +46,7 @@ export class MusicBot extends Client {
     maxQueueSize        = 500,
     autoDisconnect      = true,
     disconnectTimeout   = 300,
+    ytdlConfig    = {},
     guildSettings = null,
     sniper        = null,
   }) {
@@ -53,15 +59,17 @@ export class MusicBot extends Client {
     this.maxQueueSize     = maxQueueSize;
     this.autoDisconnect   = autoDisconnect;
     this.disconnectTimeout = disconnectTimeout;
+    /** ytdl-core / yt-dlp options forwarded to fallback resolver and DirectPlayer */
+    this.ytdlConfig       = ytdlConfig;
     this.guildSettings    = guildSettings;
     this.sniper           = sniper;
     this._sniperData      = null; // attached externally after construction
 
     this.nodePool = new NodePool();
-    /** @type {Map<string, MusicPlayer>} */
+    /** @type {Map<string, MusicPlayer|DirectPlayer>} */
     this.players  = new Map();
 
-    // Pending voice credentials per guild until both pieces arrive
+    // Pending voice credentials per guild until both pieces arrive (Lavalink path)
     this._pendingVoice = new Map();
 
     this._setupListeners();
@@ -269,60 +277,109 @@ export class MusicBot extends Client {
   // ── Voice channel helpers ──────────────────────────────────────────────────
 
   async joinVoice(channel) {
-    const guild = channel.guild;
-    try {
-      // Create the player BEFORE broadcasting OP 4 so that voice credentials
-      // arriving via VOICE_STATE_UPDATE / VOICE_SERVER_UPDATE always find an
-      // existing player and are never silently dropped.
-      const player = await this.getOrCreatePlayer(guild.id);
-      if (!player) return false;
-      player.connected      = true;
-      player.voiceChannelId = channel.id;
+    const guild   = channel.guild;
+    const guildId = String(guild.id);
 
-      // Send OP 4 (Voice State Update) to the Discord gateway
-      this.ws.broadcast({
-        op: 4,
-        d: {
-          guild_id:   guild.id,
-          channel_id: channel.id,
-          self_mute:  false,
-          self_deaf:  true,
-        },
+    // ── Lavalink path ──────────────────────────────────────────────────────
+    // Raw OP 4 broadcast is required here: client.voice.joinChannel() would
+    // establish its own voice connection and conflict with Lavalink's session.
+    if (this.nodePool.getBestNode()) {
+      try {
+        // Create the player BEFORE broadcasting OP 4 so that voice credentials
+        // arriving via VOICE_STATE_UPDATE / VOICE_SERVER_UPDATE always find an
+        // existing player and are never silently dropped.
+        const player = await this.getOrCreatePlayer(guildId);
+        if (!player) return false;
+        player.connected      = true;
+        player.voiceChannelId = channel.id;
+
+        this.ws.broadcast({
+          op: 4,
+          d: {
+            guild_id:   guildId,
+            channel_id: channel.id,
+            self_mute:  false,
+            self_deaf:  true,
+          },
+        });
+
+        // Wait for Discord to deliver VOICE_STATE_UPDATE + VOICE_SERVER_UPDATE,
+        // then forward any credentials that arrived during the OP 4 exchange so
+        // that Lavalink always receives complete voice connection details before
+        // the first track is played.
+        await sleep(VOICE_CREDENTIAL_WAIT_MS);
+        await this._tryVoiceUpdate(guildId);
+        return true;
+      } catch (err) {
+        log.error(`joinVoice (Lavalink) failed for guild ${guildId}: ${err.message}`);
+        return false;
+      }
+    }
+
+    // ── Direct path (no Lavalink node available) ───────────────────────────
+    // Use the official discord.js-selfbot-v13 API exactly as shown in the
+    // library's PlayAudio.js example.  Audio is streamed via @distube/ytdl-core
+    // through connection.playAudio() instead of a Lavalink server.
+    try {
+      log.warn(`No Lavalink node available for guild ${guildId} — using direct voice (ytdl-core)`);
+      const connection = await this.voice.joinChannel(channel, {
+        selfMute:  false,
+        selfDeaf:  true,
+        selfVideo: false,
       });
 
-      // Wait for Discord to deliver VOICE_STATE_UPDATE + VOICE_SERVER_UPDATE,
-      // then forward any credentials that arrived during the OP 4 exchange so
-      // that Lavalink always receives complete voice connection details before
-      // the first track is played.
-      await sleep(VOICE_CREDENTIAL_WAIT_MS);
-      await this._tryVoiceUpdate(guild.id);
+      const cookies = this.ytdlConfig?.cookies || '';
+      const player  = new DirectPlayer(guildId, connection, { cookies });
+      player.voiceChannelId = channel.id;
+      player.queue.maxSize  = this.maxQueueSize;
+      player.volume         = this.defaultVolume;
 
+      if (this.guildSettings) {
+        player.volume = this.guildSettings.volume(guildId);
+        const savedLoop = this.guildSettings.loopMode(guildId);
+        if (Object.values(LoopMode).includes(savedLoop)) player.setLoop(savedLoop);
+      }
+      if (this.autoDisconnect) {
+        player.onQueueEnd((gid) => this._onQueueEnd(gid));
+      }
+
+      this.players.set(guildId, player);
       return true;
     } catch (err) {
-      log.error(`joinVoice failed for guild ${guild.id}: ${err.message}`);
+      log.error(`joinVoice (direct) failed for guild ${guildId}: ${err.message}`);
       return false;
     }
   }
 
   async leaveVoice(guildId) {
-    const guild = this.guilds.cache.get(String(guildId));
-    if (guild) {
-      try {
-        this.ws.broadcast({
-          op: 4,
-          d: {
-            guild_id:   String(guildId),
-            channel_id: null,
-            self_mute:  false,
-            self_deaf:  false,
-          },
-        });
-      } catch {}
+    const key    = String(guildId);
+    const player = this.players.get(key);
+
+    if (player instanceof DirectPlayer) {
+      // Direct path: destroy() calls connection.disconnect() internally.
+      this.players.delete(key);
+      await player.destroy().catch(() => {});
+    } else {
+      // Lavalink path: send OP 4 with channel_id null to leave.
+      const guild = this.guilds.cache.get(key);
+      if (guild) {
+        try {
+          this.ws.broadcast({
+            op: 4,
+            d: {
+              guild_id:   key,
+              channel_id: null,
+              self_mute:  false,
+              self_deaf:  false,
+            },
+          });
+        } catch {}
+      }
+      this.players.delete(key);
+      if (player) await player.destroy().catch(() => {});
     }
-    const player = this.players.get(String(guildId));
-    this.players.delete(String(guildId));
-    if (player) await player.destroy().catch(() => {});
-    this._pendingVoice.delete(String(guildId));
+
+    this._pendingVoice.delete(key);
   }
 
   // ── Voice channel status updates ───────────────────────────────────────────

@@ -21,10 +21,12 @@
  */
 
 import { LoadType }   from '../lavalink/models.js';
+import { Track, TrackInfo } from '../lavalink/models.js';
 import { listFilters } from '../music/filters.js';
 import { LoopMode }   from '../music/queue.js';
 import { createLogger } from '../logger.js';
 import { resolveWithYtdl } from '../ytdl/fallback.js';
+import { DirectPlayer }    from '../ytdl/directPlayer.js';
 
 const log = createLogger('Commands');
 
@@ -140,16 +142,46 @@ async function _cmdPlay(bot, message, args) {
   const player = await _ensureVoice(bot, message);
   if (!player) return;
 
-  const identifier = _buildIdentifier(args);
   const status = await message.channel.send(`🔍 Searching for \`${args}\`…`);
+
+  // ── DirectPlayer path (no Lavalink node — streams via @distube/ytdl-core) ──
+  if (player instanceof DirectPlayer) {
+    const ytdl = await resolveWithYtdl(args, bot.ytdlConfig);
+    if (!ytdl) {
+      await status.edit({ content: '❌ No results found! (tip: set `ytdl.api_key` or install yt-dlp)' });
+      return;
+    }
+    const track = _ytdlResultToTrack(ytdl, String(message.author));
+    if (!player.current) {
+      await player.play(track);
+      await _setVoiceStatus(bot, player, track.info.title);
+      await status.edit({
+        content: `🎵 Now playing (direct): **${track.info.title}** — *${track.info.author}* \`[${track.durationStr}]\``,
+      });
+    } else {
+      player.queue.add(track);
+      await status.edit({
+        content: `➕ Added **${track.info.title}** to queue (position #${player.queue.size})`,
+      });
+    }
+    return;
+  }
+
+  // ── Lavalink path ──────────────────────────────────────────────────────────
+  const identifier = _buildIdentifier(args);
   let result = await player.node.loadTracks(identifier);
 
   if (result.isEmpty) {
-    // Primary Lavalink node found nothing — try yt-dlp as a backup source.
-    await status.edit({ content: `⚙️ No Lavalink results — trying yt-dlp fallback…` });
-    const ytdl = await resolveWithYtdl(args);
+    // Lavalink found nothing — try @distube/ytdl-core / yt-dlp as backup.
+    await status.edit({ content: `⚙️ No Lavalink results — trying backup (ytdl-core/yt-dlp)…` });
+    const ytdl = await resolveWithYtdl(args, bot.ytdlConfig);
     if (ytdl) {
-      result = await player.node.loadTracks(ytdl.url);
+      // Prefer the canonical YouTube watch URL so Lavalink can handle it
+      // natively; fall back to the CDN stream URL if that also fails.
+      result = await player.node.loadTracks(ytdl.watchUrl || ytdl.url);
+      if (result.isEmpty && ytdl.url !== ytdl.watchUrl) {
+        result = await player.node.loadTracks(ytdl.url);
+      }
     }
   }
 
@@ -187,6 +219,21 @@ async function _cmdPlay(bot, message, args) {
       content: `➕ Added **${track.info.title}** to queue (position #${player.queue.size})`,
     });
   }
+}
+
+/** Build a Track from a resolveWithYtdl result for DirectPlayer. */
+function _ytdlResultToTrack(ytdl, requester = null) {
+  const info = new TrackInfo({
+    title:      ytdl.title,
+    author:     ytdl.author,
+    length:     ytdl.durationMs,
+    uri:        ytdl.watchUrl || ytdl.url,
+    identifier: ytdl.watchUrl || ytdl.url,
+    sourceName: 'ytdl',
+    isSeekable: false,
+    isStream:   false,
+  });
+  return new Track({ encoded: '', info, requester });
 }
 
 async function _setVoiceStatus(bot, player, title) {
@@ -424,7 +471,24 @@ async function _cmdSearch(bot, message, args) {
   const player = await _ensureVoice(bot, message);
   if (!player) return;
   const status = await message.channel.send(`🔍 Searching for \`${args}\`…`);
-  const result = await player.node.loadTracks(`ytsearch:${args}`);
+
+  // DirectPlayer has no Lavalink node; fall straight to ytdl-core/yt-dlp.
+  if (player instanceof DirectPlayer) {
+    const ytdl = await resolveWithYtdl(args, bot.ytdlConfig);
+    if (!ytdl) { await status.edit({ content: '❌ No results found!' }); return; }
+    const track = _ytdlResultToTrack(ytdl);
+    await status.edit({
+      content: `🔍 **Top result (ytdl):**\n  \`1.\` **${track.info.title}** — *${track.info.author}* \`[${track.durationStr}]\``,
+    });
+    return;
+  }
+
+  let result = await player.node.loadTracks(`ytsearch:${args}`);
+  if (result.isEmpty) {
+    await status.edit({ content: `⚙️ No Lavalink results — trying backup…` });
+    const ytdl = await resolveWithYtdl(args, bot.ytdlConfig);
+    if (ytdl) result = await player.node.loadTracks(ytdl.watchUrl || ytdl.url);
+  }
   if (result.isEmpty) { await status.edit({ content: '❌ No results found!' }); return; }
   const tracks = result.tracks.slice(0, 5);
   const lines  = ['🔍 **Search Results** — reply `play <number>` to queue:'];
