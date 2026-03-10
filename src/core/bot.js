@@ -271,6 +271,14 @@ export class MusicBot extends Client {
   async joinVoice(channel) {
     const guild = channel.guild;
     try {
+      // Create the player BEFORE broadcasting OP 4 so that voice credentials
+      // arriving via VOICE_STATE_UPDATE / VOICE_SERVER_UPDATE always find an
+      // existing player and are never silently dropped.
+      const player = await this.getOrCreatePlayer(guild.id);
+      if (!player) return false;
+      player.connected      = true;
+      player.voiceChannelId = channel.id;
+
       // Send OP 4 (Voice State Update) to the Discord gateway
       this.ws.broadcast({
         op: 4,
@@ -281,12 +289,14 @@ export class MusicBot extends Client {
           self_deaf:  true,
         },
       });
-      await sleep(500);
-      const player = await this.getOrCreatePlayer(guild.id);
-      if (player) {
-        player.connected      = true;
-        player.voiceChannelId = channel.id;
-      }
+
+      // Wait for Discord to deliver VOICE_STATE_UPDATE + VOICE_SERVER_UPDATE,
+      // then forward any credentials that arrived during the OP 4 exchange so
+      // that Lavalink always receives complete voice connection details before
+      // the first track is played.
+      await sleep(VOICE_CREDENTIAL_WAIT_MS);
+      await this._tryVoiceUpdate(guild.id);
+
       return true;
     } catch (err) {
       log.error(`joinVoice failed for guild ${guild.id}: ${err.message}`);
@@ -336,6 +346,10 @@ export class MusicBot extends Client {
     try { await this.destroy(); } catch {}
   }
 }
+
+// How long to wait after broadcasting OP 4 for Discord to deliver both
+// VOICE_STATE_UPDATE and VOICE_SERVER_UPDATE before retrying the forward.
+const VOICE_CREDENTIAL_WAIT_MS = 600;
 
 function sleep(ms) {
   return new Promise(r => setTimeout(r, ms));

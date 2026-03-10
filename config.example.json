@@ -10,32 +10,11 @@
   "lavalink": {
     "nodes": [
       {
-        "name": "Node-1",
-        "host": "lavalink.devamop.in",
-        "port": 443,
-        "password": "DevamOP",
-        "secure": true
-      },
-      {
-        "name": "Node-2",
-        "host": "lavalink.jirayu.net",
-        "port": 13592,
-        "password": "youshallnotpass",
-        "secure": false
-      },
-      {
         "name": "Node-3",
-        "host": "lavalink.oops.wtf",
-        "port": 443,
-        "password": "www.freelavalink.ga",
-        "secure": true
-      },
-      {
-        "name": "Node-4",
-        "host": "lavalink.techpoint.world",
-        "port": 443,
-        "password": "techpoint",
-        "secure": true
+        "host": "n1.pulledtheirlife.support",
+        "port": 2015,
+        "password": "2MPHosting",
+        "secure": false
       }
     ]
   },

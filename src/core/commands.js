@@ -24,6 +24,7 @@ import { LoadType }   from '../lavalink/models.js';
 import { listFilters } from '../music/filters.js';
 import { LoopMode }   from '../music/queue.js';
 import { createLogger } from '../logger.js';
+import { resolveWithYtdl } from '../ytdl/fallback.js';
 
 const log = createLogger('Commands');
 
@@ -141,7 +142,16 @@ async function _cmdPlay(bot, message, args) {
 
   const identifier = _buildIdentifier(args);
   const status = await message.channel.send(`🔍 Searching for \`${args}\`…`);
-  const result = await player.node.loadTracks(identifier);
+  let result = await player.node.loadTracks(identifier);
+
+  if (result.isEmpty) {
+    // Primary Lavalink node found nothing — try yt-dlp as a backup source.
+    await status.edit({ content: `⚙️ No Lavalink results — trying yt-dlp fallback…` });
+    const ytdl = await resolveWithYtdl(args);
+    if (ytdl) {
+      result = await player.node.loadTracks(ytdl.url);
+    }
+  }
 
   if (result.isEmpty) {
     await status.edit({ content: '❌ No results found!' });
