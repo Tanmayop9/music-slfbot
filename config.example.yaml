@@ -1,107 +1,14 @@
 # ─────────────────────────────────────────────────────────────────────────────
-#  Music SelfBot + Vanity Sniper — Example Configuration
+#  SS Selfbot — Example Configuration
 #  Copy this file to  config.yaml  and fill in your details.
-#  ⚠  DO NOT commit config.yaml — it contains your tokens.
+#  ⚠  DO NOT commit config.yaml — it contains your token.
 # ─────────────────────────────────────────────────────────────────────────────
 
-# ── Owner ──────────────────────────────────────────────────────────────────
-# Your Discord user ID.  ONLY messages from this account will trigger commands
-# (music AND sniper).  Right-click your name → "Copy User ID" (Dev-Mode on).
+# Your Discord user ID (right-click name → Copy User ID with Dev Mode on)
 owner_id: 123456789012345678
 
-# ── Music Bot — selfbot token ──────────────────────────────────────────────
-# Your Discord user account token.
+# Your Discord account token
 token: "YOUR_DISCORD_USER_TOKEN"
 
-# Command prefix (applies to both music and sniper commands)
+# Command prefix
 prefix: "!"
-
-# ── Lavalink nodes ─────────────────────────────────────────────────────────
-# Multi-node failover — the bot always picks the least-loaded available node.
-lavalink:
-  nodes:
-    - name: "Node-3"
-      host: "n1.pulledtheirlife.support"
-      port: 2015
-      password: "2MPHosting"
-      secure: false
-
-# ── yt-dlp / @distube/ytdl-core backup ────────────────────────────────────────
-# Used automatically when Lavalink cannot find / load a track, OR when no
-# Lavalink node is reachable (streams directly via @distube/ytdl-core).
-#
-# Termux quick-start:
-#   pkg install python ffmpeg nodejs
-#   pip install yt-dlp
-#   npm install        ← installs @distube/ytdl-core, opusscript, libsodium-wrappers
-#   cp config.example.yaml config.yaml
-#   node main.js
-#
-# Both fields are optional — leave empty to use yt-dlp search without auth.
-ytdl:
-  # YouTube Data API v3 key — improves search accuracy and bypasses yt-dlp.
-  # Get one free at: https://console.cloud.google.com/
-  api_key: ""
-
-  # Raw YouTube cookie string for age-restricted / login-required content.
-  # Browser DevTools → Network → any youtube.com request → Request Headers → Cookie
-  # ⚠  Keep this file private and NEVER commit it to a public repository.
-  cookies: ""
-
-# ── Music bot settings ─────────────────────────────────────────────────────
-settings:
-  default_volume: 100          # 0-200
-  max_queue_size: 500          # max tracks per guild queue
-  auto_disconnect: true        # leave voice when queue empties
-  disconnect_timeout: 300      # seconds of inactivity before auto-disconnect
-
-# ── Vanity Sniper ──────────────────────────────────────────────────────────
-# Set to false to disable the sniper entirely (no accounts or tokens needed).
-sniper: false
-
-# To enable the sniper, replace the line above with a config block like this:
-#
-# sniper:
-#
-#   # Accounts used for monitoring AND claiming.
-#   # Each account must already be a member of the guilds it will monitor.
-#   accounts:
-#     - name: "Sniper-1"
-#       token: "YOUR_DISCORD_USER_TOKEN_FOR_SNIPER"
-#       # Guilds where this account will TRY to claim a sniped vanity.
-#       # The account must have Manage Server permission in each guild.
-#       claim_guilds:
-#         - id: 987654321098765432    # Replace with your guild ID
-#         # - id: 111222333444555666  # Add more claim targets
-#
-#     # Add more accounts for parallel monitoring / claiming:
-#     # - name: "Sniper-2"
-#     #   token: "ANOTHER_TOKEN"
-#     #   claim_guilds:
-#     #     - id: 987654321098765432
-#
-#   # Vanity codes to watch.  Leave empty ( [] ) to snipe ANY vanity that drops.
-#   targets:
-#     - "example-vanity"
-#     # - "another-code"
-#
-#   # HTTP webhook URL for snipe notifications (optional).
-#   webhook_url: ""   # e.g. "https://discord.com/api/webhooks/ID/TOKEN"
-#
-#   # Leave the source guild automatically after a successful snipe.
-#   auto_leave: false
-#
-#   # HTTP-CONNECT proxy list (optional).
-#   # Round-robin assigned to accounts.  Supports http://user:pass@host:port
-#   proxies: []
-#   # proxies:
-#   #   - "http://user:pass@proxy1.example.com:8080"
-#   #   - "http://user:pass@proxy2.example.com:8080"
-#
-#   # MFA / 2FA bypass (only needed if your account has 2FA enabled).
-#   mfa:
-#     enabled: false
-#     # Either provide your TOTP secret (base32, from authenticator app setup):
-#     totp_secret: ""
-#     # OR your account password (used as MFA authorization fallback):
-#     password: ""
