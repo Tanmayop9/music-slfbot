@@ -64,6 +64,13 @@ async function main() {
     sniper = new VanitySniper(config, sniperData);
   }
 
+  // ── yt-dlp / ytdl-core settings ───────────────────────────────────────────────
+  const ytdlRaw    = config.ytdl || {};
+  const ytdlConfig = {
+    apiKey:  (ytdlRaw.api_key  || '').trim(),
+    cookies: (ytdlRaw.cookies  || '').trim(),
+  };
+
   // ── Music bot ─────────────────────────────────────────────────────────────────
   const bot = new MusicBot({
     token,
@@ -74,6 +81,7 @@ async function main() {
     maxQueueSize,
     autoDisconnect,
     disconnectTimeout,
+    ytdlConfig,
     guildSettings,
     sniper,
   });

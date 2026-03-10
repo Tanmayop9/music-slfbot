@@ -20,29 +20,33 @@ prefix: "!"
 # Multi-node failover — the bot always picks the least-loaded available node.
 lavalink:
   nodes:
-    - name: "Node-1"
-      host: "lavalink.devamop.in"
-      port: 443
-      password: "DevamOP"
-      secure: true
-
-    - name: "Node-2"
-      host: "lavalink.jirayu.net"
-      port: 13592
-      password: "youshallnotpass"
+    - name: "Node-3"
+      host: "n1.pulledtheirlife.support"
+      port: 2015
+      password: "2MPHosting"
       secure: false
 
-    - name: "Node-3"
-      host: "lavalink.oops.wtf"
-      port: 443
-      password: "www.freelavalink.ga"
-      secure: true
+# ── yt-dlp / @distube/ytdl-core backup ────────────────────────────────────────
+# Used automatically when Lavalink cannot find / load a track, OR when no
+# Lavalink node is reachable (streams directly via @distube/ytdl-core).
+#
+# Termux quick-start:
+#   pkg install python ffmpeg nodejs
+#   pip install yt-dlp
+#   npm install        ← installs @distube/ytdl-core, opusscript, libsodium-wrappers
+#   cp config.example.yaml config.yaml
+#   node main.js
+#
+# Both fields are optional — leave empty to use yt-dlp search without auth.
+ytdl:
+  # YouTube Data API v3 key — improves search accuracy and bypasses yt-dlp.
+  # Get one free at: https://console.cloud.google.com/
+  api_key: ""
 
-    - name: "Node-4"
-      host: "lavalink.techpoint.world"
-      port: 443
-      password: "techpoint"
-      secure: true
+  # Raw YouTube cookie string for age-restricted / login-required content.
+  # Browser DevTools → Network → any youtube.com request → Request Headers → Cookie
+  # ⚠  Keep this file private and NEVER commit it to a public repository.
+  cookies: ""
 
 # ── Music bot settings ─────────────────────────────────────────────────────
 settings:
