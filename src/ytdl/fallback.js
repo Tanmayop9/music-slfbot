@@ -213,11 +213,12 @@ async function _resolveWithYtdlp(query, { cookies = '' } = {}) {
 function _runYtdlp(args) {
   // Ensure Termux pip-installed binaries are visible even in restricted PATH.
   const env = { ...process.env };
-  if (!env.PATH?.includes(TERMUX_BIN)) {
+  const pathSegments = (env.PATH || '').split(':');
+  if (!pathSegments.includes(TERMUX_BIN)) {
     env.PATH = `${TERMUX_BIN}:${env.PATH || ''}`;
   }
   return new Promise((resolve, reject) => {
-    execFile('yt-dlp', args, { timeout: 30_000, env }, (error, stdout, stderr) => {
+    execFile('yt-dlp', args, { timeout: 15_000, env }, (error, stdout, stderr) => {
       if (error) {
         const err = new Error(stderr?.trim() || error.message);
         err.code = error.code;

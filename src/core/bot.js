@@ -20,6 +20,10 @@ import { LoopMode }       from '../music/queue.js';
 import { handleCommand }  from './commands.js';
 import { createLogger }   from '../logger.js';
 
+// How long to wait after broadcasting OP 4 for Discord to deliver both
+// VOICE_STATE_UPDATE and VOICE_SERVER_UPDATE before retrying the forward.
+const VOICE_CREDENTIAL_WAIT_MS = 600;
+
 const log = createLogger('MusicBot');
 
 export class MusicBot extends Client {
@@ -276,52 +280,21 @@ export class MusicBot extends Client {
 
   // ── Voice channel helpers ──────────────────────────────────────────────────
 
+  /**
+   * Join a voice channel using the official discord.js-selfbot-v13 API
+   * (client.voice.joinChannel), exactly as shown in the library's PlayAudio.js
+   * example.  Always creates a DirectPlayer so @distube/ytdl-core can stream
+   * audio directly — this is the primary/preferred path.
+   *
+   * If ytdl-core cannot resolve a track, call switchToLavalink() to tear down
+   * this connection and reconnect via the Lavalink raw-OP4 path instead.
+   */
   async joinVoice(channel) {
     const guild   = channel.guild;
     const guildId = String(guild.id);
 
-    // ── Lavalink path ──────────────────────────────────────────────────────
-    // Raw OP 4 broadcast is required here: client.voice.joinChannel() would
-    // establish its own voice connection and conflict with Lavalink's session.
-    if (this.nodePool.getBestNode()) {
-      try {
-        // Create the player BEFORE broadcasting OP 4 so that voice credentials
-        // arriving via VOICE_STATE_UPDATE / VOICE_SERVER_UPDATE always find an
-        // existing player and are never silently dropped.
-        const player = await this.getOrCreatePlayer(guildId);
-        if (!player) return false;
-        player.connected      = true;
-        player.voiceChannelId = channel.id;
-
-        this.ws.broadcast({
-          op: 4,
-          d: {
-            guild_id:   guildId,
-            channel_id: channel.id,
-            self_mute:  false,
-            self_deaf:  true,
-          },
-        });
-
-        // Wait for Discord to deliver VOICE_STATE_UPDATE + VOICE_SERVER_UPDATE,
-        // then forward any credentials that arrived during the OP 4 exchange so
-        // that Lavalink always receives complete voice connection details before
-        // the first track is played.
-        await sleep(VOICE_CREDENTIAL_WAIT_MS);
-        await this._tryVoiceUpdate(guildId);
-        return true;
-      } catch (err) {
-        log.error(`joinVoice (Lavalink) failed for guild ${guildId}: ${err.message}`);
-        return false;
-      }
-    }
-
-    // ── Direct path (no Lavalink node available) ───────────────────────────
-    // Use the official discord.js-selfbot-v13 API exactly as shown in the
-    // library's PlayAudio.js example.  Audio is streamed via @distube/ytdl-core
-    // through connection.playAudio() instead of a Lavalink server.
+    // ── Primary path: direct voice via official API + @distube/ytdl-core ──────
     try {
-      log.warn(`No Lavalink node available for guild ${guildId} — using direct voice (ytdl-core)`);
       const connection = await this.voice.joinChannel(channel, {
         selfMute:  false,
         selfDeaf:  true,
@@ -344,11 +317,70 @@ export class MusicBot extends Client {
       }
 
       this.players.set(guildId, player);
+      log.info(`[${guildId}] Joined voice (direct / ytdl-core)`);
       return true;
     } catch (err) {
       log.error(`joinVoice (direct) failed for guild ${guildId}: ${err.message}`);
       return false;
     }
+  }
+
+  /**
+   * Switch an existing DirectPlayer session to Lavalink.
+   *
+   * Called by _cmdPlay / _cmdSearch when @distube/ytdl-core cannot resolve the
+   * requested track and a Lavalink node is available as a fallback.
+   *
+   * Steps:
+   *   1. Destroy the DirectPlayer (disconnects library's voice connection).
+   *   2. Broadcast raw OP 4 so Lavalink can capture the new voice credentials.
+   *   3. Create a MusicPlayer backed by the best available Lavalink node.
+   *
+   * @param {string|number} guildId
+   * @param {object} channel  Discord VoiceChannel to reconnect to.
+   * @returns {Promise<import('../music/player.js').MusicPlayer|null>}
+   */
+  async switchToLavalink(guildId, channel) {
+    const key = String(guildId);
+
+    const node = this.nodePool.getBestNode();
+    if (!node) {
+      log.warn(`switchToLavalink: no Lavalink node available for guild ${key}`);
+      return null;
+    }
+
+    // Tear down the existing DirectPlayer / voice connection.
+    const existing = this.players.get(key);
+    if (existing) {
+      this.players.delete(key);
+      await existing.destroy().catch(() => {});
+    }
+    this._pendingVoice.delete(key);
+
+    // Create a MusicPlayer (Lavalink).  Must exist BEFORE broadcasting OP 4
+    // so voice credentials are captured as soon as they arrive.
+    const player = await this.getOrCreatePlayer(key);
+    if (!player) return null;
+    player.connected      = true;
+    player.voiceChannelId = channel.id;
+
+    // Raw OP 4 broadcast — required for Lavalink credential forwarding.
+    // client.voice.joinChannel() would conflict with Lavalink's session.
+    this.ws.broadcast({
+      op: 4,
+      d: {
+        guild_id:   key,
+        channel_id: channel.id,
+        self_mute:  false,
+        self_deaf:  true,
+      },
+    });
+
+    await sleep(VOICE_CREDENTIAL_WAIT_MS);
+    await this._tryVoiceUpdate(key);
+
+    log.info(`[${key}] Switched from direct to Lavalink`);
+    return player;
   }
 
   async leaveVoice(guildId) {
@@ -403,10 +435,6 @@ export class MusicBot extends Client {
     try { await this.destroy(); } catch {}
   }
 }
-
-// How long to wait after broadcasting OP 4 for Discord to deliver both
-// VOICE_STATE_UPDATE and VOICE_SERVER_UPDATE before retrying the forward.
-const VOICE_CREDENTIAL_WAIT_MS = 600;
 
 function sleep(ms) {
   return new Promise(r => setTimeout(r, ms));

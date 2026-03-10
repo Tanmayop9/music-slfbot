@@ -139,51 +139,60 @@ async function _cmdPlay(bot, message, args) {
     return;
   }
 
-  const player = await _ensureVoice(bot, message);
+  // Join voice first (always creates a DirectPlayer via official joinChannel API).
+  let player = await _ensureVoice(bot, message);
   if (!player) return;
 
+  const voiceChannel = message.guild.members.cache.get(message.author.id)?.voice?.channel;
   const status = await message.channel.send(`🔍 Searching for \`${args}\`…`);
 
-  // ── DirectPlayer path (no Lavalink node — streams via @distube/ytdl-core) ──
-  if (player instanceof DirectPlayer) {
-    const ytdl = await resolveWithYtdl(args, bot.ytdlConfig);
-    if (!ytdl) {
-      await status.edit({ content: '❌ No results found! (tip: set `ytdl.api_key` or install yt-dlp)' });
+  // ── Priority 1: @distube/ytdl-core direct stream ───────────────────────────
+  // Always attempted first, regardless of whether a Lavalink node is available.
+  const ytdl = await resolveWithYtdl(args, bot.ytdlConfig);
+
+  if (ytdl) {
+    // Ensure we're on a DirectPlayer (join may have already created one).
+    if (!(player instanceof DirectPlayer)) {
+      // Unlikely path: player was already Lavalink — switch back to direct.
+      if (voiceChannel) player = await _ensureDirectVoice(bot, message, voiceChannel) ?? player;
+    }
+    if (player instanceof DirectPlayer) {
+      const track = _ytdlResultToTrack(ytdl, String(message.author));
+      if (!player.current) {
+        await player.play(track);
+        await _setVoiceStatus(bot, player, track.info.title);
+        await status.edit({
+          content: `🎵 Now playing: **${track.info.title}** — *${track.info.author}* \`[${track.durationStr}]\``,
+        });
+      } else {
+        player.queue.add(track);
+        await status.edit({
+          content: `➕ Added **${track.info.title}** to queue (position #${player.queue.size})`,
+        });
+      }
       return;
     }
-    const track = _ytdlResultToTrack(ytdl, String(message.author));
-    if (!player.current) {
-      await player.play(track);
-      await _setVoiceStatus(bot, player, track.info.title);
-      await status.edit({
-        content: `🎵 Now playing (direct): **${track.info.title}** — *${track.info.author}* \`[${track.durationStr}]\``,
-      });
-    } else {
-      player.queue.add(track);
-      await status.edit({
-        content: `➕ Added **${track.info.title}** to queue (position #${player.queue.size})`,
-      });
+  }
+
+  // ── Priority 2: Lavalink fallback ─────────────────────────────────────────
+  // ytdl-core could not resolve the track (non-YouTube URL, private video, etc.)
+  // — switch the voice session to Lavalink and let it handle the request.
+  await status.edit({ content: `⚙️ Searching alternative sources…` });
+
+  if (voiceChannel) {
+    const lavaPlayer = await bot.switchToLavalink(message.guild.id, voiceChannel);
+    if (lavaPlayer) {
+      player = lavaPlayer;
     }
+  }
+
+  if (player instanceof DirectPlayer || !player.node) {
+    await status.edit({ content: '❌ No results found and no Lavalink node is available!' });
     return;
   }
 
-  // ── Lavalink path ──────────────────────────────────────────────────────────
   const identifier = _buildIdentifier(args);
-  let result = await player.node.loadTracks(identifier);
-
-  if (result.isEmpty) {
-    // Lavalink found nothing — try @distube/ytdl-core / yt-dlp as backup.
-    await status.edit({ content: `⚙️ No Lavalink results — trying backup (ytdl-core/yt-dlp)…` });
-    const ytdl = await resolveWithYtdl(args, bot.ytdlConfig);
-    if (ytdl) {
-      // Prefer the canonical YouTube watch URL so Lavalink can handle it
-      // natively; fall back to the CDN stream URL if that also fails.
-      result = await player.node.loadTracks(ytdl.watchUrl || ytdl.url);
-      if (result.isEmpty && ytdl.url !== ytdl.watchUrl) {
-        result = await player.node.loadTracks(ytdl.url);
-      }
-    }
-  }
+  const result = await player.node.loadTracks(identifier);
 
   if (result.isEmpty) {
     await status.edit({ content: '❌ No results found!' });
@@ -234,6 +243,16 @@ function _ytdlResultToTrack(ytdl, requester = null) {
     isStream:   false,
   });
   return new Track({ encoded: '', info, requester });
+}
+
+/** Ensure the guild is on a DirectPlayer; reconnect if currently on Lavalink. */
+async function _ensureDirectVoice(bot, message, channel) {
+  const guildId = String(message.guild.id);
+  const existing = bot.getPlayer(guildId);
+  if (existing instanceof DirectPlayer) return existing;
+  // Not a DirectPlayer yet (e.g., previously switched to Lavalink) — rejoin.
+  const ok = await bot.joinVoice(channel);
+  return ok ? bot.getPlayer(guildId) : null;
 }
 
 async function _setVoiceStatus(bot, player, title) {
@@ -468,27 +487,29 @@ async function _cmdMove(bot, message, args) {
 
 async function _cmdSearch(bot, message, args) {
   if (!args) { await message.channel.send('❌ Usage: `search <query>`'); return; }
-  const player = await _ensureVoice(bot, message);
+  let player = await _ensureVoice(bot, message);
   if (!player) return;
+  const voiceChannel = message.guild.members.cache.get(message.author.id)?.voice?.channel;
   const status = await message.channel.send(`🔍 Searching for \`${args}\`…`);
 
-  // DirectPlayer has no Lavalink node; fall straight to ytdl-core/yt-dlp.
-  if (player instanceof DirectPlayer) {
-    const ytdl = await resolveWithYtdl(args, bot.ytdlConfig);
-    if (!ytdl) { await status.edit({ content: '❌ No results found!' }); return; }
-    const track = _ytdlResultToTrack(ytdl);
+  // ── Priority 1: ytdl-core ──────────────────────────────────────────────────
+  const ytdl = await resolveWithYtdl(args, bot.ytdlConfig);
+  if (ytdl) {
     await status.edit({
-      content: `🔍 **Top result (ytdl):**\n  \`1.\` **${track.info.title}** — *${track.info.author}* \`[${track.durationStr}]\``,
+      content: `🔍 **Top result:**\n  \`1.\` **${ytdl.title}** — *${ytdl.author}* \`[${_fmtMs(ytdl.durationMs)}]\``,
     });
     return;
   }
 
-  let result = await player.node.loadTracks(`ytsearch:${args}`);
-  if (result.isEmpty) {
-    await status.edit({ content: `⚙️ No Lavalink results — trying backup…` });
-    const ytdl = await resolveWithYtdl(args, bot.ytdlConfig);
-    if (ytdl) result = await player.node.loadTracks(ytdl.watchUrl || ytdl.url);
+  // ── Priority 2: Lavalink ───────────────────────────────────────────────────
+  if (voiceChannel) {
+    const lavaPlayer = await bot.switchToLavalink(message.guild.id, voiceChannel);
+    if (lavaPlayer) player = lavaPlayer;
   }
+  if (player instanceof DirectPlayer || !player.node) {
+    await status.edit({ content: '❌ No results found!' }); return;
+  }
+  const result = await player.node.loadTracks(`ytsearch:${args}`);
   if (result.isEmpty) { await status.edit({ content: '❌ No results found!' }); return; }
   const tracks = result.tracks.slice(0, 5);
   const lines  = ['🔍 **Search Results** — reply `play <number>` to queue:'];

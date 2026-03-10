@@ -32,12 +32,12 @@ export class DirectPlayer {
     this.current        = null;
     this.volume         = 100;
     this.paused         = false;
-    this.position       = 0;
     this.connected      = true;
     this.voiceChannelId = null;
 
-    this._dispatcher        = null;
-    this._positionTimer     = null;
+    this._dispatcher = null;
+    this._positionStart  = 0;  // Date.now() when playback started
+    this._positionOffset = 0;  // ms accumulated before the last pause
     this._queueEndCallbacks = [];
   }
 
@@ -52,7 +52,8 @@ export class DirectPlayer {
   async play(track) {
     this.current = track;
     this.paused  = false;
-    this.position = 0;
+    this._positionOffset = 0;
+    this._positionStart  = 0;
     this._stopDispatcher();
 
     const url = track.info.uri || track.info.identifier;
@@ -66,32 +67,35 @@ export class DirectPlayer {
 
     this._dispatcher.on('start', () => {
       log.debug(`[DirectPlayer ${this.guildId}] start: ${track.info.title}`);
-      this._startPositionTimer();
+      this._positionStart = Date.now();
     });
 
     this._dispatcher.on('finish', () => {
       log.debug(`[DirectPlayer ${this.guildId}] finish`);
-      this._stopPositionTimer();
       this._advance().catch(() => {});
     });
 
     this._dispatcher.on('error', (err) => {
       log.warn(`[DirectPlayer ${this.guildId}] dispatcher error: ${err.message}`);
-      this._stopPositionTimer();
       this._advance().catch(() => {});
     });
   }
 
   async pause() {
-    this.paused = true;
-    this._dispatcher?.pause();
-    this._stopPositionTimer();
+    if (!this.paused) {
+      this.paused = true;
+      this._positionOffset += this._positionStart ? Date.now() - this._positionStart : 0;
+      this._positionStart = 0;
+      this._dispatcher?.pause();
+    }
   }
 
   async resume() {
-    this.paused = false;
-    this._dispatcher?.resume();
-    this._startPositionTimer();
+    if (this.paused) {
+      this.paused = false;
+      this._positionStart = Date.now();
+      this._dispatcher?.resume();
+    }
   }
 
   async stop() {
@@ -151,26 +155,21 @@ export class DirectPlayer {
   // ── Internal helpers ───────────────────────────────────────────────────────
 
   _stopDispatcher() {
-    this._stopPositionTimer();
     if (this._dispatcher) {
       try { this._dispatcher.destroy(); } catch {}
       this._dispatcher = null;
     }
-  }
-
-  _startPositionTimer() {
-    this._stopPositionTimer();
-    this._positionTimer = setInterval(() => { this.position += 1000; }, 1000);
-  }
-
-  _stopPositionTimer() {
-    if (this._positionTimer) {
-      clearInterval(this._positionTimer);
-      this._positionTimer = null;
-    }
+    this._positionOffset += this._positionStart ? Date.now() - this._positionStart : 0;
+    this._positionStart = 0;
   }
 
   // ── Properties ─────────────────────────────────────────────────────────────
+
+  /** Current playback position in milliseconds (timestamp-based, no timer drift). */
+  get position() {
+    if (!this._positionStart) return this._positionOffset;
+    return this._positionOffset + (Date.now() - this._positionStart);
+  }
 
   get currentFilter() { return null; }
   get loopMode()      { return this.queue.loopMode; }
