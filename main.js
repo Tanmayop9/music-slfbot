@@ -2,7 +2,7 @@
  * Entry point — SS Selfbot with premium system.
  *
  * Boot order:
- *   1. Load config (config.yaml preferred, config.json fallback)
+ *   1. Load config (config.json)
  *   2. Load premium store from  data/premium.json
  *   3. Create SelfBot and start
  */
@@ -17,7 +17,7 @@ setLogFile('bot.log');
 const log = createLogger('main');
 
 async function main() {
-  const config = await loadConfig();
+  const config = loadConfig();
 
   // ── Required ──────────────────────────────────────────────────────────────
   const token = (config.token || '').trim();

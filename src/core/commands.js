@@ -13,6 +13,12 @@ import {
   cmdPing, cmdStats, cmdSay, cmdPurge,
   cmdGhostPing, cmdSteal, cmdAfk, cmdStatus, cmdHelp,
 } from '../handlers/misc.js';
+import {
+  cmdSpank, cmdSlap, cmdKiss, cmdHug,
+  cmdPat, cmdCuddle, cmdPoke, cmdBite,
+  cmdLick, cmdTickle, cmdPunch, cmdWink,
+  cmdSmack, cmdFlirt, cmdSeduce, cmdStrip,
+} from '../handlers/nsfw.js';
 
 // Commands available to owner AND premium users
 const OPEN_CMDS = {
@@ -48,6 +54,24 @@ const OPEN_CMDS = {
   presence:    cmdStatus,
   help:        (b, m, a, ctx) => cmdHelp(b, m, a, ctx.isOwner),
   h:           (b, m, a, ctx) => cmdHelp(b, m, a, ctx.isOwner),
+
+  // Fun / NSFW actions
+  spank:       cmdSpank,
+  slap:        cmdSlap,
+  kiss:        cmdKiss,
+  hug:         cmdHug,
+  pat:         cmdPat,
+  cuddle:      cmdCuddle,
+  poke:        cmdPoke,
+  bite:        cmdBite,
+  lick:        cmdLick,
+  tickle:      cmdTickle,
+  punch:       cmdPunch,
+  wink:        cmdWink,
+  smack:       cmdSmack,
+  flirt:       cmdFlirt,
+  seduce:      cmdSeduce,
+  strip:       cmdStrip,
 };
 
 // Commands available to owner only

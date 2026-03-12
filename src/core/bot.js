@@ -42,7 +42,7 @@ export class SelfBot extends Client {
 
   _setupListeners() {
     this.on('ready',         ()          => this._onReady());
-    this.on('messageCreate', (msg)       => this._onMessage(msg).catch(() => {}));
+    this.on('messageCreate', (msg)       => this._onMessage(msg).catch(err => log.error(`messageCreate: ${err.stack}`)));
     this.on('messageDelete', (msg)       => trackDeletedMessage(msg));
     this.on('messageUpdate', (old, cur)  => trackEditedMessage(old, cur));
   }

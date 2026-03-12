@@ -124,7 +124,7 @@ export async function generateUserInfoCard(member, user) {
   const ax = PAD_X + 4; // offset because of the accent bar
   const ay = (CARD_H - AV_SIZE) / 2;
 
-  drawCircle(ctx, avatarImg, getUserColor(user.id), displayName[0], ax, ay, AV_SIZE);
+  drawCircle(ctx, avatarImg, getUserColor(user.id), displayName?.[0] ?? '?', ax, ay, AV_SIZE);
 
   // ── Text section ───────────────────────────────────────────────────────────
   const textX  = ax + AV_SIZE + 18;
@@ -134,9 +134,9 @@ export async function generateUserInfoCard(member, user) {
   // Display name (nickname if set, else displayName)
   ctx.font      = `bold 22px sans-serif`;
   ctx.fillStyle = '#ffffff';
-  // Truncate if too long
+  // Truncate if too long — test width *including* ellipsis so the final string fits
   let nameStr = displayName;
-  while (ctx.measureText(nameStr).width > textW && nameStr.length > 1)
+  while (ctx.measureText(nameStr + '…').width > textW && nameStr.length > 1)
     nameStr = nameStr.slice(0, -1);
   if (nameStr !== displayName) nameStr += '…';
   ctx.fillText(nameStr, textX, textY);
@@ -228,7 +228,7 @@ export async function generateServerInfoCard(guild) {
   ctx.font      = `bold 22px sans-serif`;
   ctx.fillStyle = '#ffffff';
   let serverName = guild.name || 'Unknown Server';
-  while (ctx.measureText(serverName).width > textW && serverName.length > 1)
+  while (ctx.measureText(serverName + '…').width > textW && serverName.length > 1)
     serverName = serverName.slice(0, -1);
   if (serverName !== guild.name) serverName += '…';
   ctx.fillText(serverName, textX, textY);

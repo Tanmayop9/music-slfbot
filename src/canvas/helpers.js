@@ -89,11 +89,7 @@ export async function fetchImageBuffer(url) {
     const res = await fetch(url, { signal: AbortSignal.timeout(7000) });
     if (!res.ok) return null;
     return Buffer.from(await res.arrayBuffer());
-  } catch (err) {
-    // Silently return null — canvas falls back to initials / skips decoration
-    // Uncomment the line below for verbose debugging:
-    // createLogger('fetch').debug(`Image fetch failed for ${url}: ${err.message}`);
-    void err;
+  } catch {
     return null;
   }
 }
@@ -182,7 +178,7 @@ export function drawCircularAvatar(ctx, avatarImg, decoImg, author, displayName,
     ctx.font         = `bold ${Math.floor(size * 0.42)}px sans-serif`;
     ctx.textAlign    = 'center';
     ctx.textBaseline = 'middle';
-    ctx.fillText((displayName[0] || '?').toUpperCase(), cx, cy);
+    ctx.fillText((displayName?.[0] ?? '?').toUpperCase(), cx, cy);
     ctx.textAlign    = 'left';
     ctx.textBaseline = 'alphabetic';
   }

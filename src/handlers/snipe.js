@@ -11,6 +11,10 @@
  */
 
 // ── In-memory storage (cleared on restart — intentional) ──────────────────
+
+/** Maximum number of channels to track snipes for (prevents unbounded growth). */
+const MAX_SNIPE_CHANNELS = 500;
+
 export const snipeStore = {
   /** @type {Map<string, {content:string, author:object, timestamp:Date, attachments:string[]}>} */
   deleted: new Map(),
@@ -25,6 +29,10 @@ export function trackDeletedMessage(message) {
   if (!message.content && !message.attachments?.size) return;
   if (message.author?.bot) return;
 
+  if (snipeStore.deleted.size >= MAX_SNIPE_CHANNELS) {
+    // Maps preserve insertion order, so .keys().next() returns the oldest entry
+    snipeStore.deleted.delete(snipeStore.deleted.keys().next().value);
+  }
   snipeStore.deleted.set(message.channel.id, {
     content:     message.content || '',
     author:      message.author,
@@ -38,6 +46,10 @@ export function trackEditedMessage(oldMessage, newMessage) {
   if (oldMessage.content === newMessage.content)  return;
   if (newMessage.author?.bot) return;
 
+  if (snipeStore.edited.size >= MAX_SNIPE_CHANNELS) {
+    // Maps preserve insertion order, so .keys().next() returns the oldest entry
+    snipeStore.edited.delete(snipeStore.edited.keys().next().value);
+  }
   snipeStore.edited.set(newMessage.channel.id, {
     before:    oldMessage.content || '',
     after:     newMessage.content || '',
