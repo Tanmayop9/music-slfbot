@@ -7,5 +7,7 @@
 
   "prefix": "!",
 
-  "console_channel_id": null
+  "console_channel_id": null,
+
+  "groq_api_key": "YOUR_GROQ_API_KEY"
 }
