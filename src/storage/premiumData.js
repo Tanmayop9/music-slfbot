@@ -29,19 +29,27 @@ export class PremiumData {
 
   async add(userId) {
     userId = String(userId);
-    const users = this._getSet();
-    if (users.has(userId)) return false;
-    users.add(userId);
-    await this._store.set('users', [...users]);
-    return true;
+    let added = false;
+    await this._store.update('users', (current) => {
+      const users = new Set(current || []);
+      if (users.has(userId)) return [...users]; // no change
+      users.add(userId);
+      added = true;
+      return [...users];
+    }, []);
+    return added;
   }
 
   async remove(userId) {
     userId = String(userId);
-    const users = this._getSet();
-    if (!users.has(userId)) return false;
-    users.delete(userId);
-    await this._store.set('users', [...users]);
-    return true;
+    let removed = false;
+    await this._store.update('users', (current) => {
+      const users = new Set(current || []);
+      if (!users.has(userId)) return [...users]; // no change
+      users.delete(userId);
+      removed = true;
+      return [...users];
+    }, []);
+    return removed;
   }
 }

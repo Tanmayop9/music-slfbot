@@ -16,6 +16,8 @@ import {
 import {
   cmdSpank, cmdSlap, cmdKiss, cmdHug,
   cmdPat, cmdCuddle, cmdPoke, cmdBite,
+  cmdLick, cmdTickle, cmdPunch, cmdWink,
+  cmdSmack, cmdFlirt, cmdSeduce, cmdStrip,
 } from '../handlers/nsfw.js';
 
 // Commands available to owner AND premium users
@@ -62,6 +64,14 @@ const OPEN_CMDS = {
   cuddle:      cmdCuddle,
   poke:        cmdPoke,
   bite:        cmdBite,
+  lick:        cmdLick,
+  tickle:      cmdTickle,
+  punch:       cmdPunch,
+  wink:        cmdWink,
+  smack:       cmdSmack,
+  flirt:       cmdFlirt,
+  seduce:      cmdSeduce,
+  strip:       cmdStrip,
 };
 
 // Commands available to owner only

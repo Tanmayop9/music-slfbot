@@ -96,6 +96,29 @@ export class JSONStore {
     });
   }
 
+  /**
+   * Atomically read-modify-write a key inside the mutex.
+   * The provided function receives the current value (or `defaultValue`) and
+   * must return the new value to store.  The entire read-modify-write
+   * sequence is serialised so concurrent callers cannot interleave.
+   *
+   * @param {string}   key
+   * @param {function} fn           (currentValue) => newValue
+   * @param {*}        [defaultValue=null]
+   * @returns {Promise<*>}  the new value
+   */
+  async update(key, fn, defaultValue = null) {
+    return this._mutex.lock(async () => {
+      const current = Object.prototype.hasOwnProperty.call(this._data, key)
+        ? this._data[key]
+        : defaultValue;
+      const updated    = await fn(current);
+      this._data[key]  = updated;
+      await this._flush();
+      return updated;
+    });
+  }
+
   async clear() {
     return this._mutex.lock(async () => {
       this._data = {};
