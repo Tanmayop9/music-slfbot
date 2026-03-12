@@ -2,9 +2,9 @@
  * SelfBot — discord.js-selfbot-v13 Client subclass.
  *
  * Responsibilities:
- *   - Dispatch commands to owner (full access) and premium users (open commands).
+ *   - Dispatch commands to owner (full access).
  *   - Track deleted + edited messages for snipe commands.
- *   - Handle AFK: auto-reply to mentions of AFK users; clear AFK on next message.
+ *   - Auto-reply with a Groq AI 1-liner when someone pings or replies to the bot.
  *   - Reconnect automatically on transient disconnects.
  */
 
@@ -12,10 +12,47 @@ import { Client } from 'discord.js-selfbot-v13';
 import { handleCommand } from './commands.js';
 import { startConsole } from './console.js';
 import { trackDeletedMessage, trackEditedMessage } from '../handlers/snipe.js';
-import { getAfkData, clearAfk } from '../handlers/misc.js';
 import { createLogger } from '../logger.js';
 
 const log = createLogger('SelfBot');
+
+// ── Groq AI helper ─────────────────────────────────────────────────────────
+
+const GROQ_API_URL  = 'https://api.groq.com/openai/v1/chat/completions';
+const GROQ_MODEL    = 'llama3-8b-8192';
+const GROQ_MAX_TOKENS = 80;
+
+const SYSTEM_PROMPT =
+  'You are a witty, slightly naughty, and playfully cheeky person chatting on Discord. ' +
+  'When someone mentions or talks to you, reply with a single short sentence. ' +
+  'Sound natural and human, be a little naughty or flirtatious, and never use emojis or special characters.';
+
+async function groqReply(apiKey, userMessage) {
+  const res = await fetch(GROQ_API_URL, {
+    method: 'POST',
+    headers: {
+      'Content-Type':  'application/json',
+      'Authorization': `Bearer ${apiKey}`,
+    },
+    body: JSON.stringify({
+      model:      GROQ_MODEL,
+      messages: [
+        { role: 'system',  content: SYSTEM_PROMPT },
+        { role: 'user',    content: userMessage || 'hey' },
+      ],
+      max_tokens:   GROQ_MAX_TOKENS,
+      temperature:  0.9,
+    }),
+  });
+
+  if (!res.ok) {
+    const text = await res.text().catch(() => '');
+    throw new Error(`Groq API error ${res.status}: ${text.slice(0, 200)}`);
+  }
+
+  const data = await res.json();
+  return data.choices?.[0]?.message?.content?.trim() ?? null;
+}
 
 export class SelfBot extends Client {
   /**
@@ -25,14 +62,16 @@ export class SelfBot extends Client {
    * @param {string}  [opts.ownerId='0']
    * @param {string|null} [opts.consoleChannelId=null]
    * @param {import('../storage/premiumData.js').PremiumData|null} [opts.premiumData]
+   * @param {string|null} [opts.groqApiKey=null]
    */
-  constructor({ token, prefix = '!', ownerId = '0', consoleChannelId = null, premiumData = null }) {
+  constructor({ token, prefix = '!', ownerId = '0', consoleChannelId = null, premiumData = null, groqApiKey = null }) {
     super({ checkUpdate: false });
     this._token           = token;
     this.prefix           = prefix;
     this.ownerId          = String(ownerId);
     this.consoleChannelId = consoleChannelId ? String(consoleChannelId) : null;
     this.premiumData      = premiumData;
+    this.groqApiKey       = groqApiKey || null;
     this._setupListeners();
   }
 
@@ -91,35 +130,50 @@ export class SelfBot extends Client {
     if (!this.user) return;
     if (!message.author) return;
 
-    const authorId  = message.author.id;
-    // For a self-bot the logged-in account is always the owner.
-    // Also honour an explicitly configured owner_id so that the two can differ.
-    const isOwner   = authorId === this.user.id || authorId === this.effectiveOwnerId;
+    const authorId = message.author.id;
+    const botId    = this.user.id;
+
+    const isOwner   = authorId === botId || authorId === this.effectiveOwnerId;
     const isPremium = !isOwner && (this.premiumData?.has(authorId) ?? false);
 
-    // ── AFK: auto-reply when someone mentions an AFK user ─────────────────
-    // Runs for ALL messages in guild channels (not just owner/premium).
-    if (message.guild && message.mentions?.users?.size) {
-      for (const [uid, mentionedUser] of message.mentions.users) {
-        if (uid === authorId) continue;         // ignore self-mention
-        if (uid === this.user.id) continue;     // ignore mentions of the bot itself
-        const afk = getAfkData(uid);
-        if (!afk) continue;
-        const since = Math.floor(afk.since / 1000);
-        message.channel.send(
-          `💤 **${mentionedUser.username}** is AFK: ${afk.reason} — <t:${since}:R>`,
-        ).catch(() => {});
+    // Never auto-reply to our own messages (but still process owner commands below)
+    if (authorId === botId) {
+      // Self-bot: still process commands typed by the logged-in account
+      if (!message.content?.startsWith(this.prefix)) return;
+      const body     = message.content.slice(this.prefix.length);
+      const spaceIdx = body.search(/\s/);
+      const command  = (spaceIdx === -1 ? body : body.slice(0, spaceIdx)).toLowerCase().trim();
+      const args     = spaceIdx === -1 ? '' : body.slice(spaceIdx + 1).trimStart();
+      if (!command) return;
+      try {
+        await handleCommand(this, message, command, args, { isOwner: true, isPremium: false });
+      } catch (err) {
+        log.error(`Command '${command}': ${err.stack}`);
+      }
+      return;
+    }
+
+    // ── Groq AI auto-reply: ping or reply to bot ───────────────────────────
+    if (this.groqApiKey) {
+      const isMention  = message.mentions?.users?.has(botId);
+      const isReply    = message.reference?.messageId != null &&
+                         (await this._isBotMessage(message.channel, message.reference.messageId));
+
+      if (isMention || isReply) {
+        try {
+          const reply = await groqReply(this.groqApiKey, message.content);
+          if (reply) {
+            await message.channel.send(reply);
+          }
+        } catch (err) {
+          log.error(`groqReply: ${err.message}`);
+        }
+        return; // don't fall through to command processing
       }
     }
 
-    // ── Only process commands from owner / premium ─────────────────────────
+    // ── Only process commands from owner ──────────────────────────────────
     if (!isOwner && !isPremium) return;
-
-    // ── AFK: remove when owner/premium sends any message ──────────────────
-    if (getAfkData(authorId)) {
-      clearAfk(authorId);
-      message.channel.send('✅ Welcome back! Your AFK has been removed.').catch(() => {});
-    }
 
     if (!message.content?.startsWith(this.prefix)) return;
 
@@ -135,8 +189,21 @@ export class SelfBot extends Client {
     } catch (err) {
       log.error(`Command '${command}': ${err.stack}`);
       try {
-        await message.channel.send(`❌ Unexpected error: ${err.message}`);
+        await message.channel.send(`Unexpected error: ${err.message}`);
       } catch {}
+    }
+  }
+
+  /** Check whether a message in the given channel was authored by the bot. */
+  async _isBotMessage(channel, messageId) {
+    // Use the already-resolved reference message if available (no extra API call)
+    const resolved = channel.messages?.cache?.get(messageId);
+    if (resolved) return resolved.author?.id === this.user?.id;
+    try {
+      const msg = await channel.messages.fetch(messageId);
+      return msg?.author?.id === this.user?.id;
+    } catch {
+      return false;
     }
   }
 

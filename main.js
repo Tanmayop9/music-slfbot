@@ -43,10 +43,15 @@ async function main() {
   await premiumStore.load();
   const premiumData = new PremiumData(premiumStore);
 
+  const groqApiKey = (config.groq_api_key || '').trim() || null;
+  if (!groqApiKey) {
+    log.warn("groq_api_key not set — Groq AI auto-replies will be disabled.");
+  }
+
   log.info(`Starting | ownerId=${ownerId !== '0' ? ownerId : 'self'} | prefix=${prefix}`);
 
   // ── Bot ───────────────────────────────────────────────────────────────────
-  const bot = new SelfBot({ token, prefix, ownerId, consoleChannelId, premiumData });
+  const bot = new SelfBot({ token, prefix, ownerId, consoleChannelId, premiumData, groqApiKey });
 
   const shutdown = async (sig) => {
     log.info(`${sig} — shutting down…`);
