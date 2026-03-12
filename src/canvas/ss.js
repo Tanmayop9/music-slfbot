@@ -199,7 +199,7 @@ function drawHeader(ctx, group, y, roleIconCache) {
       ? author.roleColor
       : getUserColor(author.id);
 
-  const baseline = y + L.avatarSize * 0.68;
+  const baseline = y + L.headerSize + 2;
   let   curX     = L.contentX;
 
   // ── Username ─────────────────────────────────────────────────────────────
