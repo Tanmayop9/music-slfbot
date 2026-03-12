@@ -1,16 +1,22 @@
 /**
  * SelfBot — discord.js-selfbot-v13 Client subclass.
  *
- * Responsibilities:
- *   - Dispatch commands to owner (full access).
- *   - Track deleted + edited messages for snipe commands.
- *   - AI agent: when anyone pings or replies to the bot, Groq AI figures out
- *     the intent and executes the right Discord action:
- *       • send    — reply / mock / roast / chat / compliment / any text action
- *       • react   — add an emoji reaction to a message
- *       • reminder — store a timed reminder and confirm it
- *   - Fire due reminders on a 30-second tick.
- *   - Reconnect automatically on transient disconnects.
+ * General AI agent design:
+ *   When anyone pings or replies to the bot the agent:
+ *     1. Loads the per-user persistent memory (facts learned about that user).
+ *     2. Passes the rolling per-channel conversation history to Groq so the
+ *        model understands follow-ups ("do it again", "now roast him too", etc.).
+ *     3. Executes every action in the returned `actions` array:
+ *          send     — post a text reply (chat, roast, mock, answer, anything)
+ *          react    — add an emoji reaction to a message
+ *          reminder — store a timed reminder and confirm it
+ *     4. Persists any new `memory` facts the model extracted about the user.
+ *
+ *   Other responsibilities:
+ *     - Dispatch prefix commands to the owner.
+ *     - Track deleted + edited messages for snipe commands.
+ *     - Fire due reminders on a 30-second tick.
+ *     - Reconnect automatically on transient disconnects.
  */
 
 import { Client } from 'discord.js-selfbot-v13';
@@ -25,55 +31,76 @@ const log = createLogger('SelfBot');
 
 const GROQ_API_URL    = 'https://api.groq.com/openai/v1/chat/completions';
 const GROQ_MODEL      = 'llama3-8b-8192';
-const GROQ_MAX_TOKENS = 300;
+const GROQ_MAX_TOKENS = 500;
+
+/** Maximum conversation turns kept in memory per channel (user + assistant pairs). */
+const MAX_HISTORY_MSGS = 20;
 
 /**
- * System prompt injected with the current UTC time.
+ * Build the system prompt.
  *
- * The AI must return a JSON object with one of three shapes:
+ * Injecting the current UTC time lets the model resolve relative datetimes.
+ * Injecting user facts personalises every response.
  *
- *   send action (default for most requests — mocking, roasting, chatting, replying, etc.)
- *     { "action": "send", "content": "<text to send, no emojis>" }
+ * Expected response shape from the model:
+ * {
+ *   "actions": [
+ *     { "action": "send",     "content": "<text, no emojis>" },
+ *     { "action": "react",    "emoji": "<unicode emoji>", "target": "current|referenced" },
+ *     { "action": "reminder", "remindAt": "<ISO UTC>", "reminderMsg": "<text>", "content": "<confirmation>" }
+ *   ],
+ *   "memory": [
+ *     { "userId": "<discord id>", "fact": "<one sentence>" }
+ *   ]
+ * }
  *
- *   react action (user asks the bot to react to a message with an emoji)
- *     { "action": "react", "emoji": "<single unicode emoji>", "target": "current" | "referenced" }
- *     target = "referenced" when the user is replying to another message and wants
- *     the bot to react to THAT message; otherwise "current" to react to the user's own message.
- *
- *   reminder action (user wants to be reminded about something at a specific time)
- *     { "action": "reminder", "remindAt": "<ISO 8601 UTC>", "reminderMsg": "<what to remind>", "content": "<casual confirmation, no emojis>" }
+ * @param {string[]} userFacts  Facts already known about the user.
+ * @returns {string}
  */
-function buildSystemPrompt() {
-  const now = new Date().toISOString();
-  return (
-    `You are an intelligent, witty, slightly naughty Discord bot assistant. Current UTC time: ${now}. ` +
-    `A user is talking to you. Understand their request and respond with a JSON object describing the action to take. ` +
-    `\n\n` +
-    `ACTION TYPES:\n` +
-    `1. send — use for: mocking someone, roasting someone, chatting, replying, complimenting, commenting on a message, any text-based task. ` +
-    `   JSON: {"action":"send","content":"<the text, no emojis, punchy and human>"}\n` +
-    `2. react — use when the user explicitly asks to react/add a reaction/emoji to a message. ` +
-    `   target is "referenced" if they want to react to the message they are replying to, otherwise "current". ` +
-    `   JSON: {"action":"react","emoji":"<one unicode emoji>","target":"current"}\n` +
-    `3. reminder — use when the user wants to be reminded about something at a future time. ` +
-    `   JSON: {"action":"reminder","remindAt":"<ISO 8601 UTC datetime>","reminderMsg":"<concise reminder text>","content":"<casual confirmation, no emojis>"}\n` +
-    `\n` +
-    `RULES:\n` +
-    `- For mock/roast: be creative, savage, and funny.\n` +
-    `- Never use emojis in "content" or "reminderMsg" fields.\n` +
-    `- Keep text short and punchy (1-3 sentences max).\n` +
-    `- Respond with valid JSON only, nothing else.`
-  );
+function buildSystemPrompt(userFacts = []) {
+  const now         = new Date().toISOString();
+  const memSection  = userFacts.length
+    ? `\nWHAT YOU ALREADY KNOW ABOUT THIS USER:\n${userFacts.map(f => `- ${f}`).join('\n')}\n`
+    : '';
+
+  return [
+    `You are a witty, slightly naughty, intelligent AI agent on Discord. Current UTC time: ${now}.`,
+    memSection,
+    `You have full memory of this conversation via the message history provided.`,
+    ``,
+    `Respond with a JSON object in this exact shape:`,
+    `{"actions":[...],"memory":[...]}`,
+    ``,
+    `ACTIONS ARRAY — include one or more:`,
+    `  {"action":"send","content":"<text, no emojis, short and punchy>"}`,
+    `  {"action":"react","emoji":"<single unicode emoji>","target":"current|referenced"}`,
+    `    (target=referenced means react to the message being replied to; target=current means the user's own message)`,
+    `  {"action":"reminder","remindAt":"<ISO 8601 UTC>","reminderMsg":"<what to remind>","content":"<casual confirmation, no emojis>"}`,
+    ``,
+    `MEMORY ARRAY (optional) — facts you want to remember about the user for future conversations:`,
+    `  [{"userId":"<their Discord id>","fact":"<one short sentence, no emojis>"}]`,
+    ``,
+    `RULES:`,
+    `- Always include at least one action.`,
+    `- For mock/roast: be savage, creative, and funny.`,
+    `- Never use emojis inside "content", "reminderMsg", or "fact" string values.`,
+    `- Use conversation history for context — handle follow-ups like "do it again" or "now roast him too".`,
+    `- When the user shares personal info (name, likes, location, etc.) add it to memory.`,
+    `- Keep text short and punchy (1–3 sentences max).`,
+    `- Respond with valid JSON only, nothing else.`,
+  ].join('\n');
 }
 
 /**
- * Call the Groq chat completion API and return the parsed intent object.
+ * Call the Groq chat-completion API with a full conversation history.
  *
- * @param {string} apiKey
- * @param {string} userMessage
- * @returns {Promise<object>}
+ * @param {string}   apiKey
+ * @param {string}   systemPrompt
+ * @param {Array<{role:string,content:string}>} history  Full message history including
+ *                                                        the current user message as last entry.
+ * @returns {Promise<{actions: object[], memory?: object[]}>}
  */
-async function groqIntent(apiKey, userMessage) {
+async function groqAgent(apiKey, systemPrompt, history) {
   const res = await fetch(GROQ_API_URL, {
     method: 'POST',
     headers: {
@@ -82,10 +109,7 @@ async function groqIntent(apiKey, userMessage) {
     },
     body: JSON.stringify({
       model:           GROQ_MODEL,
-      messages: [
-        { role: 'system', content: buildSystemPrompt() },
-        { role: 'user',   content: userMessage || 'hey' },
-      ],
+      messages:        [{ role: 'system', content: systemPrompt }, ...history],
       max_tokens:      GROQ_MAX_TOKENS,
       temperature:     0.9,
       response_format: { type: 'json_object' },
@@ -99,10 +123,19 @@ async function groqIntent(apiKey, userMessage) {
 
   const data    = await res.json();
   const content = data.choices?.[0]?.message?.content?.trim() ?? '{}';
+
   try {
-    return JSON.parse(content);
+    const parsed = JSON.parse(content);
+    // Gracefully handle old single-action shape { action, content, ... }
+    if (!Array.isArray(parsed.actions) && parsed.action) {
+      const { action, content: c, emoji, target, remindAt, reminderMsg } = parsed;
+      parsed.actions = [{ action, content: c, emoji, target, remindAt, reminderMsg }];
+    }
+    if (!Array.isArray(parsed.actions)) parsed.actions = [];
+    return parsed;
   } catch {
-    return { action: 'send', content: content };
+    // JSON parse failed — don't expose raw API output to users
+    return { actions: [{ action: 'send', content: 'had a brain glitch, try again' }] };
   }
 }
 
@@ -120,6 +153,7 @@ export class SelfBot extends Client {
    * @param {string|null} [opts.consoleChannelId=null]
    * @param {import('../storage/premiumData.js').PremiumData|null}   [opts.premiumData]
    * @param {import('../storage/reminderData.js').ReminderData|null} [opts.reminderData]
+   * @param {import('../storage/memoryData.js').MemoryData|null}     [opts.memoryData]
    * @param {string|null} [opts.groqApiKey=null]
    */
   constructor({
@@ -129,6 +163,7 @@ export class SelfBot extends Client {
     consoleChannelId = null,
     premiumData      = null,
     reminderData     = null,
+    memoryData       = null,
     groqApiKey       = null,
   }) {
     super({ checkUpdate: false });
@@ -138,8 +173,11 @@ export class SelfBot extends Client {
     this.consoleChannelId = consoleChannelId ? String(consoleChannelId) : null;
     this.premiumData      = premiumData;
     this.reminderData     = reminderData;
+    this.memoryData       = memoryData;
     this.groqApiKey       = groqApiKey || null;
     this._reminderTimer   = null;
+    /** @type {Map<string, Array<{role:string,content:string}>>} */
+    this._convHistory     = new Map();
     this._setupListeners();
   }
 
@@ -166,7 +204,7 @@ export class SelfBot extends Client {
     while (true) {
       try {
         await this.login(this._token);
-        return;
+        return; // clean exit (e.g. SIGINT destroyed the client)
       } catch (err) {
         const msg = err.message || '';
         if (msg.includes('TOKEN_INVALID') || err.code === 4004) {
@@ -209,9 +247,9 @@ export class SelfBot extends Client {
     const channelCache = new Map();
     for (const reminder of due) {
       if (!channelCache.has(reminder.channelId)) {
-        const channel = this.channels.cache.get(reminder.channelId)
+        const ch = this.channels.cache.get(reminder.channelId)
           ?? await this.channels.fetch(reminder.channelId).catch(() => null);
-        channelCache.set(reminder.channelId, channel);
+        channelCache.set(reminder.channelId, ch);
       }
     }
 
@@ -219,9 +257,7 @@ export class SelfBot extends Client {
       const channel = channelCache.get(reminder.channelId);
       try {
         if (channel) {
-          await channel.send(
-            `hey <@${reminder.userId}>, just a reminder — ${reminder.message}`,
-          );
+          await channel.send(`hey <@${reminder.userId}>, just a reminder — ${reminder.message}`);
         } else {
           log.warn(`Reminder ${reminder.id}: channel ${reminder.channelId} not found`);
         }
@@ -291,79 +327,129 @@ export class SelfBot extends Client {
     } catch (err) {
       log.error(`Command '${command}': ${err.stack}`);
       try {
-        await message.channel.send(`Unexpected error: ${err.message}`);
+        await message.channel.send(`❌ Unexpected error: ${err.message}`);
       } catch {}
     }
   }
 
-  // ── AI interaction dispatcher ──────────────────────────────────────────────
+  // ── AI agent core ──────────────────────────────────────────────────────────
 
   /**
-   * Ask Groq to classify the message intent and execute the right action:
-   *   send     → post a text message (mock, roast, chat, any text task)
-   *   react    → add an emoji reaction to a message
-   *   reminder → store a timed reminder and send a confirmation
+   * Full agent turn:
+   *   1. Load user memory.
+   *   2. Append incoming message to channel history.
+   *   3. Call Groq with system prompt + full history.
+   *   4. Execute every returned action.
+   *   5. Persist any new memory facts.
+   *   6. Append the bot's first text response to history.
    */
   async _handleAiInteraction(message) {
-    let intent;
+    const channelId = message.channel.id;
+    const authorId  = message.author.id;
+
+    // 1. Load what we know about this user
+    const userFacts = this.memoryData ? this.memoryData.get(authorId) : [];
+
+    // 2. Append the new user message to the rolling channel history
+    const prevHistory = this._convHistory.get(channelId) ?? [];
+    const history     = [
+      ...prevHistory,
+      { role: 'user', content: message.content || '' },
+    ];
+
+    // 3. Call Groq
+    const systemPrompt = buildSystemPrompt(userFacts);
+    let result;
     try {
-      intent = await groqIntent(this.groqApiKey, message.content);
+      result = await groqAgent(this.groqApiKey, systemPrompt, history);
     } catch (err) {
-      log.error(`groqIntent: ${err.message}`);
+      log.error(`groqAgent: ${err.message}`);
       return;
     }
 
-    const action = intent?.action ?? 'send';
+    // 4. Execute all actions in order; collect sent text for history
+    const actions   = Array.isArray(result?.actions) ? result.actions : [];
+    let firstSentText = null;
 
-    switch (action) {
-      case 'react':
-        await this._executeReact(message, intent);
-        break;
+    for (const action of actions) {
+      if (!action?.action) continue;
+      switch (action.action) {
+        case 'send':
+          if (action.content) {
+            await message.channel.send(action.content).catch(() => {});
+            firstSentText ??= action.content; // keep first sent text for conversation history
+          }
+          break;
 
-      case 'reminder':
-        await this._executeReminder(message, intent);
-        break;
+        case 'react':
+          await this._executeReact(message, action);
+          break;
 
-      case 'send':
-      default:
-        if (intent?.content) {
-          await message.channel.send(intent.content).catch(() => {});
+        case 'reminder': {
+          const sent = await this._executeReminder(message, action);
+          firstSentText ??= sent; // keep first sent text for conversation history
+          break;
         }
-        break;
+      }
     }
+
+    // 5. Persist memory facts the model identified
+    if (this.memoryData && Array.isArray(result?.memory)) {
+      for (const item of result.memory) {
+        if (item?.userId && item?.fact) {
+          await this.memoryData.addFact(String(item.userId), String(item.fact))
+            .catch(err => log.error(`memoryData.addFact: ${err.message}`));
+        }
+      }
+    }
+
+    // 6. Update rolling history: user message already added; add bot reply
+    const updatedHistory = firstSentText
+      ? [...history, { role: 'assistant', content: firstSentText }]
+      : history;
+
+    // Cap to keep only the most recent MAX_HISTORY_MSGS messages
+    const capped = updatedHistory.length > MAX_HISTORY_MSGS
+      ? updatedHistory.slice(-MAX_HISTORY_MSGS)
+      : updatedHistory;
+
+    this._convHistory.set(channelId, capped);
   }
 
-  /** Add an emoji reaction to the target message. */
-  async _executeReact(message, intent) {
-    const emoji = intent?.emoji;
+  // ── Action executors ───────────────────────────────────────────────────────
+
+  /** Add a single emoji reaction to the target message. */
+  async _executeReact(message, action) {
+    const emoji = action?.emoji;
     if (!emoji) return;
 
-    // "referenced" → react to the message the user was replying to;
-    // "current"    → react to the user's own message.
-    let targetMessage = message;
-    if (intent.target === 'referenced' && message.reference?.messageId) {
+    // "referenced" → react to the message the user was replying to
+    let targetMsg = message;
+    if (action.target === 'referenced' && message.reference?.messageId) {
       try {
-        targetMessage = await message.channel.messages.fetch(message.reference.messageId);
+        targetMsg = await message.channel.messages.fetch(message.reference.messageId);
       } catch {
-        targetMessage = message;
+        targetMsg = message;
       }
     }
 
     try {
-      await targetMessage.react(emoji);
+      await targetMsg.react(emoji);
     } catch (err) {
       log.error(`react: ${err.message}`);
-      // Fall back to telling the user we couldn't do it
-      await message.channel.send('could not add that reaction, use a standard unicode emoji').catch(() => {});
+      await message.channel.send('Could not add that reaction. Please use a standard Unicode emoji.').catch(() => {});
     }
   }
 
-  /** Store a reminder and send the AI-generated confirmation. */
-  async _executeReminder(message, intent) {
-    const confirmation = intent?.content;
+  /**
+   * Store a reminder and send the AI-generated confirmation.
+   * @returns {Promise<string|null>} The confirmation text that was sent, or null.
+   */
+  async _executeReminder(message, action) {
+    const confirmation = action?.content ?? null;
 
-    if (intent?.remindAt && intent?.reminderMsg && this.reminderData) {
-      const remindAt = new Date(intent.remindAt);
+    if (action?.remindAt && action?.reminderMsg && this.reminderData) {
+      const remindAt = new Date(action.remindAt);
       if (!isNaN(remindAt.getTime()) && remindAt.getTime() > Date.now()) {
         const reminder = {
           id:        makeId(),
@@ -371,7 +457,7 @@ export class SelfBot extends Client {
           channelId: message.channel.id,
           guildId:   message.guild?.id ?? null,
           remindAt:  remindAt.toISOString(),
-          message:   intent.reminderMsg,
+          message:   action.reminderMsg,
           createdAt: new Date().toISOString(),
         };
         try {
@@ -381,16 +467,23 @@ export class SelfBot extends Client {
           log.error(`Failed to save reminder: ${err.message}`);
         }
       } else {
-        log.warn(`groqIntent returned invalid/past remindAt: ${intent.remindAt}`);
+        log.warn(`groqAgent returned invalid/past remindAt: ${action.remindAt}`);
       }
     }
 
     if (confirmation) {
       await message.channel.send(confirmation).catch(() => {});
     }
+    return confirmation;
   }
 
-  /** Check whether a message in the given channel was authored by the bot. */
+  // ── Utilities ──────────────────────────────────────────────────────────────
+
+  /**
+   * Check whether a message in the given channel was authored by the bot.
+   * Cache is checked first to avoid an unnecessary REST fetch; the API is
+   * only called when the message is not already in the local message cache.
+   */
   async _isBotMessage(channel, messageId) {
     const resolved = channel.messages?.cache?.get(messageId);
     if (resolved) return resolved.author?.id === this.user?.id;
@@ -411,5 +504,3 @@ export class SelfBot extends Client {
 }
 
 function sleep(ms) { return new Promise(r => setTimeout(r, ms)); }
-
-

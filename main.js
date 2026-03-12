@@ -11,6 +11,7 @@ import { setLogFile, createLogger } from './src/logger.js';
 import { JSONStore }     from './src/storage/store.js';
 import { PremiumData }  from './src/storage/premiumData.js';
 import { ReminderData } from './src/storage/reminderData.js';
+import { MemoryData }   from './src/storage/memoryData.js';
 import { SelfBot }      from './src/core/bot.js';
 import { loadConfig }   from './src/config.js';
 
@@ -49,6 +50,11 @@ async function main() {
   await reminderStore.load();
   const reminderData = new ReminderData(reminderStore);
 
+  // ── User memory store ─────────────────────────────────────────────────────
+  const memoryStore = new JSONStore('data/memory.json');
+  await memoryStore.load();
+  const memoryData = new MemoryData(memoryStore);
+
   const groqApiKey = (config.groq_api_key || '').trim() || null;
   if (!groqApiKey) {
     log.warn("groq_api_key not set — Groq AI auto-replies will be disabled.");
@@ -57,7 +63,7 @@ async function main() {
   log.info(`Starting | ownerId=${ownerId !== '0' ? ownerId : 'self'} | prefix=${prefix}`);
 
   // ── Bot ───────────────────────────────────────────────────────────────────
-  const bot = new SelfBot({ token, prefix, ownerId, consoleChannelId, premiumData, reminderData, groqApiKey });
+  const bot = new SelfBot({ token, prefix, ownerId, consoleChannelId, premiumData, reminderData, memoryData, groqApiKey });
 
   const shutdown = async (sig) => {
     log.info(`${sig} — shutting down…`);
