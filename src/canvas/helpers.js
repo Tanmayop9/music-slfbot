@@ -175,7 +175,7 @@ export function drawCircularAvatar(ctx, avatarImg, decoImg, author, displayName,
     ctx.fillStyle    = getUserColor(author?.id || '0');
     ctx.fillRect(x, y, size, size);
     ctx.fillStyle    = '#ffffff';
-    ctx.font         = `bold ${Math.floor(size * 0.42)}px sans-serif`;
+    ctx.font         = `bold ${Math.floor(size * 0.42)}px Inter, sans-serif`;
     ctx.textAlign    = 'center';
     ctx.textBaseline = 'middle';
     ctx.fillText((displayName?.[0] ?? '?').toUpperCase(), cx, cy);

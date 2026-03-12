@@ -27,6 +27,7 @@ import {
   drawCircularAvatar,
   stripMarkdown,
 } from './helpers.js';
+import { loadFonts } from './fonts.js';
 import { createLogger } from '../logger.js';
 
 const log = createLogger('SSGen');
@@ -121,7 +122,7 @@ function groupMessages(messages) {
 
 function measureGroupH(mCtx, group) {
   let h = L.groupGap + L.lineH;        // top gap + header row
-  mCtx.font = `${L.msgSize}px sans-serif`;
+  mCtx.font = `${L.msgSize}px Inter, sans-serif`;
   for (const msg of group.msgs) {
     const text    = stripMarkdown(msg.content || '').trim();
     const attCnt  = msg.attachments?.length || 0;
@@ -202,7 +203,7 @@ function drawHeader(ctx, group, y, roleIconCache) {
   let   curX     = L.contentX;
 
   // ── Username ─────────────────────────────────────────────────────────────
-  ctx.font      = `600 ${L.headerSize}px sans-serif`;
+  ctx.font      = `600 ${L.headerSize}px Inter, sans-serif`;
   ctx.fillStyle = nameColor;
   const nameStr = truncate(ctx, displayName, L.maxNameW);
   ctx.fillText(nameStr, curX, baseline);
@@ -220,7 +221,7 @@ function drawHeader(ctx, group, y, roleIconCache) {
     ctx.fill();
 
     ctx.fillStyle    = '#ffffff';
-    ctx.font         = 'bold 10px sans-serif';
+    ctx.font         = 'bold 10px Inter, sans-serif';
     ctx.textAlign    = 'center';
     ctx.textBaseline = 'middle';
     ctx.fillText('APP', tx + tw / 2, ty + th / 2);
@@ -249,7 +250,7 @@ function drawHeader(ctx, group, y, roleIconCache) {
   }
 
   // ── Timestamp ─────────────────────────────────────────────────────────────
-  ctx.font      = `${L.timestampSize}px sans-serif`;
+  ctx.font      = `${L.timestampSize}px Inter, sans-serif`;
   ctx.fillStyle = DISCORD.textMuted;
   ctx.fillText(formatFullDate(msgs[0].timestamp), curX + 2, baseline - 1);
 }
@@ -261,7 +262,7 @@ function drawMessages(ctx, msgs, startY) {
     const text   = stripMarkdown(msg.content || '').trim();
     const attCnt = msg.attachments?.length || 0;
 
-    ctx.font      = `${L.msgSize}px sans-serif`;
+    ctx.font      = `${L.msgSize}px Inter, sans-serif`;
     ctx.fillStyle = DISCORD.text;
 
     if (text) {
@@ -339,6 +340,9 @@ function drawGroup(ctx, group, startY, avatarCache, decoCache, roleIconCache) {
 export async function generateSS(messages) {
   if (!messages?.length) throw new Error('No messages provided');
 
+  // Ensure Inter font is downloaded and registered before rendering
+  await loadFonts();
+
   const groups = groupMessages(messages);
 
   // ── Pass 1: measure exact canvas height ───────────────────────────────────
@@ -371,7 +375,7 @@ export async function generateSS(messages) {
   ctx.fillStyle = '#3a3c41';
   ctx.fillRect(L.padX, y + 2, L.width - L.padX * 2, 1);
 
-  ctx.font      = '11px sans-serif';
+  ctx.font      = '11px Inter, sans-serif';
   ctx.fillStyle = '#4f545c';
   ctx.textAlign = 'right';
   ctx.fillText(
