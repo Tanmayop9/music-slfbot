@@ -1,6 +1,10 @@
 /**
  * `ss` command handler.
  *
+ * Two modes:
+ *   !ss @user [count]        — screenshot the last N real messages from that user
+ *   !ss @user <message text> — generate a fake screenshot with the provided text
+ *
  * - Deletes the invoker's command message immediately.
  * - Fetches the target user's guild member to resolve:
  *     • Nickname           (shown instead of global display name when set)
@@ -69,20 +73,29 @@ export async function cmdSS(bot, message, args) {
     return message.channel.send('❌ `ss` can only be used inside a server.');
   }
   if (!args) {
-    return message.channel.send(`❌ Usage: \`${bot.prefix}ss @user [count]\``);
+    return message.channel.send(
+      `❌ Usage:\n` +
+      `• \`${bot.prefix}ss @user [count]\` — screenshot last N real messages\n` +
+      `• \`${bot.prefix}ss @user <message text>\` — generate fake message screenshot`,
+    );
   }
 
   // ── 1. Resolve target user ───────────────────────────────────────────────
   const parts      = args.trim().split(/\s+/);
   let   targetUser = null;
   let   count      = 30;
+  let   fakeText   = null;   // non-null → custom-message mode
 
   const mention = message.mentions?.users?.first();
   if (mention) {
     targetUser = mention;
-    const last = parts[parts.length - 1];
-    if (parts.length > 1 && /^\d+$/.test(last)) {
-      count = Math.min(parseInt(last, 10), 50);
+    const rest = parts.slice(1).join(' ').trim();
+    if (rest) {
+      if (/^\d+$/.test(rest)) {
+        count = Math.min(parseInt(rest, 10), 50);
+      } else {
+        fakeText = rest;
+      }
     }
   } else {
     const rawId = parts[0].replace(/[<@!>]/g, '');
@@ -92,14 +105,23 @@ export async function cmdSS(bot, message, args) {
       } catch {
         return message.channel.send('❌ Could not find that user.');
       }
-      if (parts.length > 1 && /^\d+$/.test(parts[1])) {
-        count = Math.min(parseInt(parts[1], 10), 50);
+      const rest = parts.slice(1).join(' ').trim();
+      if (rest) {
+        if (/^\d+$/.test(rest)) {
+          count = Math.min(parseInt(rest, 10), 50);
+        } else {
+          fakeText = rest;
+        }
       }
     }
   }
 
   if (!targetUser) {
-    return message.channel.send(`❌ Usage: \`${bot.prefix}ss @user [count]\``);
+    return message.channel.send(
+      `❌ Usage:\n` +
+      `• \`${bot.prefix}ss @user [count]\` — screenshot last N real messages\n` +
+      `• \`${bot.prefix}ss @user <message text>\` — generate fake message screenshot`,
+    );
   }
 
   // ── 2. Fetch fresh user data (decoration is only present on forced fetch) ─
@@ -131,7 +153,45 @@ export async function cmdSS(bot, message, args) {
   // Best display name for the caption
   const displayName   = nickname ?? freshUser.displayName ?? freshUser.username;
 
-  // ── 4. Fetch recent messages from this user ──────────────────────────────
+  // ── 4a. Custom-message mode: build a single synthetic message ────────────
+  if (fakeText !== null) {
+    const status = await message.channel.send(
+      `📸 Generating screenshot for **${displayName}**…`,
+    );
+    try {
+      const authorInfo = {
+        id:           freshUser.id,
+        username:     freshUser.username,
+        displayName:  freshUser.displayName || freshUser.username,
+        nickname,
+        roleColor,
+        avatarURL,
+        decorationURL,
+        roleIconURL,
+        bot:          freshUser.bot,
+      };
+      const msgData = [{
+        id:          'fake-message',
+        content:     fakeText,
+        timestamp:   new Date(),
+        author:      authorInfo,
+        attachments: [],
+        embeds:      0,
+      }];
+
+      const imgBuf = await generateSS(msgData);
+      await status.delete().catch(() => {});
+      return message.channel.send({
+        content: `📸 **${displayName}**`,
+        files:   [{ attachment: imgBuf, name: 'screenshot.png' }],
+      });
+    } catch (err) {
+      log.error(`SS (fake) failed: ${err.stack}`);
+      return status.edit({ content: `❌ Failed to generate screenshot: ${err.message}` });
+    }
+  }
+
+  // ── 4b. Real-message mode: fetch recent messages from this user ──────────
   const status = await message.channel.send(
     `📸 Generating screenshot for **${displayName}**…`,
   );
