@@ -257,6 +257,16 @@ export async function cmdHelp(bot, message, isOwner) {
     `\`${p}status <type> [text]\` — Change bot presence`,
     `\`${p}ping\` — API & WebSocket latency`,
     `\`${p}stats\` — Bot statistics`,
+    '',
+    '**🔞 Fun / Actions**',
+    `\`${p}spank @user\` — Spank someone 👋`,
+    `\`${p}slap @user\` — Slap someone 👋`,
+    `\`${p}kiss @user\` — Kiss someone 💋`,
+    `\`${p}hug @user\` — Hug someone 🤗`,
+    `\`${p}pat @user\` — Pat someone 🤚`,
+    `\`${p}cuddle @user\` — Cuddle someone 🥰`,
+    `\`${p}poke @user\` — Poke someone 👉`,
+    `\`${p}bite @user\` — Bite someone 😬`,
   ];
 
   if (isOwner) {
