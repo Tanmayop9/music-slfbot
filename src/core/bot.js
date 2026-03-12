@@ -10,6 +10,7 @@
 
 import { Client } from 'discord.js-selfbot-v13';
 import { handleCommand } from './commands.js';
+import { startConsole } from './console.js';
 import { trackDeletedMessage, trackEditedMessage } from '../handlers/snipe.js';
 import { getAfkData, clearAfk } from '../handlers/misc.js';
 import { createLogger } from '../logger.js';
@@ -22,14 +23,16 @@ export class SelfBot extends Client {
    * @param {string}  opts.token
    * @param {string}  [opts.prefix='!']
    * @param {string}  [opts.ownerId='0']
+   * @param {string|null} [opts.consoleChannelId=null]
    * @param {import('../storage/premiumData.js').PremiumData|null} [opts.premiumData]
    */
-  constructor({ token, prefix = '!', ownerId = '0', premiumData = null }) {
+  constructor({ token, prefix = '!', ownerId = '0', consoleChannelId = null, premiumData = null }) {
     super({ checkUpdate: false });
-    this._token      = token;
-    this.prefix      = prefix;
-    this.ownerId     = String(ownerId);
-    this.premiumData = premiumData;
+    this._token           = token;
+    this.prefix           = prefix;
+    this.ownerId          = String(ownerId);
+    this.consoleChannelId = consoleChannelId ? String(consoleChannelId) : null;
+    this.premiumData      = premiumData;
     this._setupListeners();
   }
 
@@ -79,6 +82,7 @@ export class SelfBot extends Client {
 
   _onReady() {
     log.info(`Logged in as ${this.user.tag} (${this.user.id})`);
+    startConsole(this);
   }
 
   // ── Message handler ────────────────────────────────────────────────────────
@@ -88,7 +92,9 @@ export class SelfBot extends Client {
     if (!message.author) return;
 
     const authorId  = message.author.id;
-    const isOwner   = authorId === this.effectiveOwnerId;
+    // For a self-bot the logged-in account is always the owner.
+    // Also honour an explicitly configured owner_id so that the two can differ.
+    const isOwner   = authorId === this.user.id || authorId === this.effectiveOwnerId;
     const isPremium = !isOwner && (this.premiumData?.has(authorId) ?? false);
 
     // ── AFK: auto-reply when someone mentions an AFK user ─────────────────

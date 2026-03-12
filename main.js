@@ -33,6 +33,11 @@ async function main() {
 
   const prefix = (config.prefix || '!').trim();
 
+  // ── Optional console channel ───────────────────────────────────────────────
+  const consoleChannelId = config.console_channel_id
+    ? String(config.console_channel_id)
+    : null;
+
   // ── Premium store ─────────────────────────────────────────────────────────
   const premiumStore = new JSONStore('data/premium.json');
   await premiumStore.load();
@@ -41,7 +46,7 @@ async function main() {
   log.info(`Starting | ownerId=${ownerId !== '0' ? ownerId : 'self'} | prefix=${prefix}`);
 
   // ── Bot ───────────────────────────────────────────────────────────────────
-  const bot = new SelfBot({ token, prefix, ownerId, premiumData });
+  const bot = new SelfBot({ token, prefix, ownerId, consoleChannelId, premiumData });
 
   const shutdown = async (sig) => {
     log.info(`${sig} — shutting down…`);

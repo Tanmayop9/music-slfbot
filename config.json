@@ -5,5 +5,7 @@
 
   "token": "YOUR_DISCORD_USER_TOKEN",
 
-  "prefix": "!"
+  "prefix": "!",
+
+  "console_channel_id": null
 }

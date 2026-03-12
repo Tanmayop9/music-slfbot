@@ -52,8 +52,8 @@ const OPEN_CMDS = {
   afk:         cmdAfk,
   status:      cmdStatus,
   presence:    cmdStatus,
-  help:        (b, m, a, ctx) => cmdHelp(b, m, a, ctx.isOwner),
-  h:           (b, m, a, ctx) => cmdHelp(b, m, a, ctx.isOwner),
+  help:        (b, m, _a, ctx) => cmdHelp(b, m, ctx.isOwner),
+  h:           (b, m, _a, ctx) => cmdHelp(b, m, ctx.isOwner),
 
   // Fun / NSFW actions
   spank:       cmdSpank,
