@@ -67,7 +67,7 @@ export async function cmdAvatar(bot, message, args) {
 
   return message.channel.send({
     content: `🖼️ **${targetUser.tag ?? targetUser.username}**'s avatar`,
-    files:   [url],
+    files:   [{ attachment: url, name: 'avatar.png' }],
   });
 }
 
